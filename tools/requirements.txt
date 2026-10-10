@@ -1,3 +1,5 @@
-# Инструменты разработки. Ставятся в системный Python (команда py, версия не важна), не в Win64\python3.7.
+# Инструменты разработки. Ставятся в системный Python (команда py), не в Win64\python3.7.
 # Установка: py -m pip install -r tools/requirements.txt
 ruff>=0.6
+# tools/ai_call.py, tools/gemini_review.py. Требует Python >= 3.10; API сверено с 2.29.0.
+google-genai>=2.29,<3
