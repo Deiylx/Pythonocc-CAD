@@ -10,3 +10,13 @@
 
 __pycache__/
 *.pyc
+
+# --- каркас cad_io ---
+# секреты
+.env
+# личные настройки Claude Code
+.claude/settings.local.json
+# временные файлы тестов и инструментов
+tests/_tmp/
+*.tmp
+.ruff_cache/
