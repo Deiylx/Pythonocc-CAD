@@ -1,0 +1,3 @@
+# Инструменты разработки. Ставятся в системный Python (команда py, версия не важна), не в Win64\python3.7.
+# Установка: py -m pip install -r tools/requirements.txt
+ruff>=0.6

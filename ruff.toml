@@ -1,0 +1,13 @@
+# Полная проверка — для нашего кода (cad_io/, tests/, tools/).
+# Для старого кода хук tools/hooks/ruff_check.py проверяет только грубые ошибки.
+target-version = "py37"
+line-length = 100
+
+extend-exclude = [
+    "Win64/python3.7",
+    "Sources",
+    "Win64/module/Assemble.py",  # кодировка GBK, не трогать
+]
+
+[lint]
+select = ["E", "F", "W", "B"]
