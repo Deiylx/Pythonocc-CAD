@@ -30,8 +30,9 @@ argument-hint: "[формат, например step]"
 7. **Запустить**:
 
    ```
-   .\Win64\python3.7\python.exe -B -m unittest discover -s tests -v
+   .\tools\run_tests.ps1
    ```
 
+   (Без `Win64\python3.7\Library\bin` в PATH, который добавляет скрипт, OCC не грузится: `ImportError: DLL load failed`.)
    Показать вывод как есть. Тест красный — не подгонять допуски, а разобраться и сказать человеку.
 8. Предложить строку для `TEST_PLAN.md` (`формат | что проверяем | как | статус`) — дописать только после «ок».
