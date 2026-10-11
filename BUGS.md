@@ -13,6 +13,9 @@
 | BUG-007 | Win64/module/OCAFModule.py:238 | В `Import_part()` `finally: Loadprocess.Close()` без `try/except` (в отличие от `Open_part()`, строки 154–158). `Loadprocess` создаётся только внутри `if os.path.exists(filepath):` (строка 170): если пользователь отменил выбор файла или исключение случилось раньше, `finally` бросает `UnboundLocalError` | список — Opus 5.5; строка — grep (Sonnet 5.5); подтверждено Opus (прочитан метод) | открыт |
 | BUG-008 | Win64/sketcher/sketcher.py:90 | Проверка не того ключа: `elif self.sketch_type==1 and self.new_do_draw_dict["rectangle"]==None:` — для профиля создаётся `"profile"`, проверять нужно его | подсказка — Opus 5.5; строка и описание — grep (Sonnet 5.5) | открыт |
 | BUG-009 | Win64/sketcher/sketcher.py:362 и :366 | Список вместо словаря: `self.windown_sketcher_dict=[]` (строка 362), далее `if windown_name in self.windown_sketcher_dict.keys():` (строка 366) → AttributeError | подсказка — Opus 5.5; строка и описание — grep (Sonnet 5.5) | открыт |
+| BUG-010 | Win64/Ribbon/RibbonMain.ini:5 | У кнопки 导出 подсказка `status_tip=打开` («открыть») — скопирована от кнопки 打开. Та же заглушка `打开` у кнопок на строках 6, 21, 22, 35–39, 56 | черновик ИИ: Claude Code (Opus 5.5), поиск по файлу; при подключении кнопки (задача I4) сознательно не исправляется — «Не входит» | открыт |
+| BUG-011 | Win64/sketcher/sketcher.py:39 | `get_all_sketcher_element()` обращается к `self.parent.Sketcher.new_do_draw_dict` (строка 43 и далее), где `self.parent` — главное окно, а `Sketcher` — `SketchModule` без `new_do_draw_dict`; `AttributeError` глушится голым `except`, поэтому функция, по чтению кода, всегда возвращает `{}` | черновик ИИ: Claude Code (Opus 5.5), по чтению кода, не запускалось | открыт |
+| BUG-012 | Win64/module/ShowGui.py:160–166 | `change_ribbon()` глушит любое исключение (`except: pass`, строка 165): ошибка в `connection` из `RibbonMain.ini` (там `eval`, BUG-001) не видна — лента молча остаётся пустой или недостроенной | черновик ИИ: Claude Code (Opus 5.5), по чтению кода, не запускалось | открыт |
 
 ## Примечания
 
@@ -20,3 +23,4 @@
 - BUG-008 и BUG-009 добавлены по указанию Сергея на «проверку не того ключа» и «список вместо словаря» в `Win64/sketcher/`.
 - BUG-003 дополнительно подтверждает ruff: `F821 Undefined name 'name'` в `OCAFModule.py:245`.
 - Вручную людьми сверены только BUG-001 и BUG-002.
+- BUG-010…BUG-012 — черновик ИИ (ветка `chore/process-fixes`): решения по открытым вопросам дорожной карты, вынесенные из задач в «Не входит»; людьми не сверены.
