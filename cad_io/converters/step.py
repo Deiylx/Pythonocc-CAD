@@ -10,7 +10,12 @@ import os
 
 from OCC.Core.IFSelect import IFSelect_RetDone
 from OCC.Core.Interface import Interface_Static_SetCVal
-from OCC.Core.STEPControl import STEPControl_AsIs, STEPControl_Reader, STEPControl_Writer
+from OCC.Core.STEPControl import (
+    STEPControl_AsIs,
+    STEPControl_Controller_Init,
+    STEPControl_Reader,
+    STEPControl_Writer,
+)
 
 from cad_io.strings import (
     ERR_STEP_EMPTY_SHAPE,
@@ -33,9 +38,9 @@ def write_step(shape, path):
         raise ValueError(ERR_STEP_EMPTY_SHAPE)
     path = os.fspath(path)
 
-    # Параметры write.step.* появляются только после создания первого STEPControl_Writer
-    # (или Reader): до этого SetCVal возвращает False. Поэтому writer создаём раньше.
-    writer = STEPControl_Writer()
+    # Параметры write.step.* появляются только после инициализации контроллера STEP:
+    # до этого SetCVal возвращает False.
+    STEPControl_Controller_Init()
 
     # Interface_Static — глобальное состояние OCCT: выставляем при каждой записи.
     if not Interface_Static_SetCVal("write.step.schema", STEP_SCHEMA):
@@ -43,6 +48,8 @@ def write_step(shape, path):
     if not Interface_Static_SetCVal("write.step.unit", STEP_UNIT):
         raise OSError(ERR_STEP_WRITE_FAILED.format(path=path))
 
+    # Схему writer запоминает при создании, поэтому создаём его после SetCVal.
+    writer = STEPControl_Writer()
     if writer.Transfer(shape, STEPControl_AsIs) != IFSelect_RetDone:
         raise OSError(ERR_STEP_WRITE_FAILED.format(path=path))
     if writer.Write(path) != IFSelect_RetDone:

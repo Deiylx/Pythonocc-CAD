@@ -8,6 +8,8 @@ from pathlib import Path
 from OCC.Core.BRepGProp import brepgprop_VolumeProperties
 from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
 from OCC.Core.GProp import GProp_GProps
+from OCC.Core.Interface import Interface_Static_CVal, Interface_Static_SetCVal
+from OCC.Core.STEPControl import STEPControl_Controller_Init
 from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_SOLID
 from OCC.Core.TopExp import TopExp_Explorer
 from OCC.Core.TopoDS import TopoDS_Shape
@@ -25,15 +27,32 @@ from cad_io.strings import (
 BOX_VOLUME = 10.0 * 20.0 * 30.0
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-# Запись в новом процессе: глобальное состояние OCCT ещё не тронуто другими тестами.
+# Запись и чтение в новом процессе: глобальное состояние OCCT ещё не тронуто другими тестами.
 WRITE_IN_FRESH_PROCESS = """
 import sys
 from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
+from OCC.Core.TopAbs import TopAbs_FACE
+from OCC.Core.TopExp import TopExp_Explorer
 from cad_io.formats import register_builtin
 from cad_io.registry import Registry
 spec = register_builtin(Registry()).find_by_path(sys.argv[1])
 spec.writer(BRepPrimAPI_MakeBox(10.0, 20.0, 30.0).Shape(), sys.argv[1])
+explorer = TopExp_Explorer(spec.reader(sys.argv[1]), TopAbs_FACE)
+faces = 0
+while explorer.More():
+    faces += 1
+    explorer.Next()
+print("faces={}".format(faces))
 """
+
+# Что ищем в тексте файла STEP (строки взяты из файла, который пишет write_step):
+# - схема AP214 в заголовке: FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));
+#   (при AP203 там было бы CONFIG_CONTROL_DESIGN);
+# - единица длины мм в секции DATA: #N = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );
+#   (при единице "M" там было бы SI_UNIT($,.METRE.)).
+STEP_SCHEMA_AP214 = "FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));"
+STEP_SCHEMA_AP203 = "CONFIG_CONTROL_DESIGN"
+STEP_LENGTH_UNIT_MM = "LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.)"
 
 IMPORT_DOES_NOT_REGISTER = """
 import cad_io
@@ -164,11 +183,52 @@ class StepRoundtripTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "fresh.step"
             result = run_fresh_python(WRITE_IN_FRESH_PROCESS, str(path))
-            self.assertEqual(
-                result.returncode, 0, result.stdout.decode("utf-8", "replace")
-            )
+            output = result.stdout.decode("utf-8", "replace")
+            self.assertEqual(result.returncode, 0, output)
             self.assertTrue(path.is_file())
             self.assertGreater(path.stat().st_size, 0)
+            self.assertIn("faces=6", output.splitlines())
+
+
+class StepFileContentTests(unittest.TestCase):
+
+    def setUp(self):
+        self.spec = register_builtin(Registry()).find_by_extension(".step")
+
+    def write_box_text(self, directory):
+        path = Path(directory) / "box.step"
+        self.spec.writer(make_box(), path)
+        return path.read_text(encoding="ascii")
+
+    def assertSchemaAndUnits(self, text):
+        # В сообщении — только строки схемы и единиц, а не весь файл.
+        found = [
+            line for line in text.splitlines()
+            if "FILE_SCHEMA" in line or "LENGTH_UNIT" in line
+        ]
+        self.assertTrue(STEP_SCHEMA_AP214 in text, found)
+        self.assertFalse(STEP_SCHEMA_AP203 in text, found)
+        self.assertTrue(STEP_LENGTH_UNIT_MM in text, found)
+
+    def test_schema_ap214_and_units_mm(self):
+        with tempfile.TemporaryDirectory() as directory:
+            text = self.write_box_text(directory)
+        self.assertSchemaAndUnits(text)
+
+    def test_schema_and_units_override_global_state(self):
+        # По умолчанию OCCT 7.4 и так пишет AP214 и мм, поэтому без этого теста
+        # пропажа SetCVal из write_step была бы незаметна. Interface_Static — общее
+        # состояние процесса: имитируем чужой код, выставивший AP203 и метры.
+        STEPControl_Controller_Init()  # без него параметров write.step.* ещё нет
+        for name in ("write.step.schema", "write.step.unit"):
+            self.addCleanup(Interface_Static_SetCVal, name, Interface_Static_CVal(name))
+        self.assertTrue(Interface_Static_SetCVal("write.step.schema", "AP203"))
+        self.assertTrue(Interface_Static_SetCVal("write.step.unit", "M"))
+
+        with tempfile.TemporaryDirectory() as directory:
+            text = self.write_box_text(directory)
+
+        self.assertSchemaAndUnits(text)
 
 
 class StepErrorTests(unittest.TestCase):
