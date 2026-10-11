@@ -163,6 +163,24 @@ class PrepareExportPathTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Недопустимое расширение"):
                 prepare_export_path(path, allowed_exts="igs")
 
+    def test_default_ext_without_leading_dot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "модель"
+            result = prepare_export_path(path, default_ext="step")
+            self.assertEqual(result, Path(directory) / "модель.step")
+
+    def test_allowed_exts_tuple_without_leading_dot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "a.igs"
+            result = prepare_export_path(path, allowed_exts=("igs",))
+            self.assertEqual(result, path)
+
+    def test_existing_suffix_ignores_default_ext(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "part.stp"
+            result = prepare_export_path(path, default_ext=".step")
+            self.assertEqual(result, path)
+
 
 if __name__ == "__main__":
     unittest.main()
