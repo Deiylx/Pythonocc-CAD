@@ -11,6 +11,7 @@ ai_call импортирует его только внутри call_gemini(), �
 import io
 import json
 import os
+import ssl
 import sys
 import tempfile
 import unittest
@@ -39,7 +40,7 @@ class _BinaryStdin(object):
 
 class ResolveModelTest(unittest.TestCase):
     def test_default_model(self):
-        self.assertEqual(ai_call.resolve_model(env={}), "gemini-3.1-pro-preview")
+        self.assertEqual(ai_call.resolve_model(env={}), "gemini-3.8-flash")
 
     def test_model_from_env(self):
         self.assertEqual(ai_call.resolve_model(env={"GEMINI_MODEL": " m-1 "}), "m-1")
@@ -130,7 +131,7 @@ class DryRunTest(unittest.TestCase):
                 os.environ.clear()
                 os.environ.update(saved_env)
         self.assertEqual(code, 0)
-        self.assertIn("gemini-3.1-pro-preview", printed)
+        self.assertIn("gemini-3.8-flash", printed)
         self.assertIn("Промпт из файла", printed)
 
 
@@ -222,6 +223,181 @@ class RealCallTest(unittest.TestCase):
         self.assertEqual(record["status"], "error")
         self.assertIn("RuntimeError", record["error"])
         self.assertIn("***", record["error"])
+
+
+# Подделки исключений с теми же именами классов и полями, что в google-genai 2.29.0
+# (errors.APIError: .code, .status, str = "<code> <status>. <details>") и httpx 0.28.1
+# (ConnectError -> NetworkError -> TransportError). Сами библиотеки в 3.7 не импортируются.
+class APIError(Exception):
+    def __init__(self, code, status, message):
+        self.code, self.status, self.message = code, status, message
+        details = {"error": {"code": code, "message": message, "status": status}}
+        super(APIError, self).__init__("{} {}. {}".format(code, status, details))
+
+
+class ClientError(APIError):
+    pass
+
+
+class ServerError(APIError):
+    pass
+
+
+class TransportError(Exception):
+    pass
+
+
+class NetworkError(TransportError):
+    pass
+
+
+class ConnectError(NetworkError):
+    pass
+
+
+class ReadTimeout(TransportError):
+    pass
+
+
+def _unavailable():
+    return ServerError(503, "UNAVAILABLE", "This model is currently experiencing high demand.")
+
+
+def _quota():
+    return ClientError(429, "RESOURCE_EXHAUSTED", "You exceeded your current quota.")
+
+
+def _location():
+    return ClientError(400, "FAILED_PRECONDITION",
+                       "User location is not supported for the API use.")
+
+
+class ConnectTimeout(TransportError):
+    pass
+
+
+class RemoteProtocolError(TransportError):
+    pass
+
+
+class IsRetryableTest(unittest.TestCase):
+    def test_retryable(self):
+        for exc in (_unavailable(), ServerError(500, "INTERNAL", "x"), _location(),
+                    ConnectError("EOF occurred in violation of protocol (_ssl.c:997)"),
+                    ConnectTimeout("t"), RemoteProtocolError("Server disconnected"),
+                    ssl.SSLEOFError(8, "EOF"),  # настоящий класс stdlib
+                    ConnectionResetError(10054, "WinError 10054")):
+            self.assertTrue(ai_call.is_retryable(exc), repr(exc))
+
+    def test_not_retryable(self):
+        for exc in (_quota(), ClientError(400, "INVALID_ARGUMENT", "bad request"),
+                    ClientError(404, "NOT_FOUND", "no model"),
+                    ClientError(400, "FAILED_PRECONDITION", "billing required"),
+                    APIError(None, None, "без кода"),
+                    ReadTimeout("timed out"), ValueError("x"), RuntimeError("x")):
+            self.assertFalse(ai_call.is_retryable(exc), repr(exc))
+
+    def test_delay_for_every_retry(self):
+        # RETRY_DELAYS_S[attempt - 1] не должен выйти за границу, если поменять MAX_ATTEMPTS.
+        self.assertEqual(len(ai_call.RETRY_DELAYS_S), ai_call.MAX_ATTEMPTS - 1)
+
+
+class RetryTest(unittest.TestCase):
+    """Повтор в run(): отправка и пауза подменены, сети и настоящих пауз нет."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.log = os.path.join(self.tmp.name, "calls.jsonl")
+        self.sleeps = []
+        self.calls = 0
+
+    def _run(self, outcomes):
+        """outcomes — по одному на попытку: исключение (бросить) или строка (ответ)."""
+        def sender(prompt, model, api_key):
+            self.calls += 1
+            outcome = outcomes[self.calls - 1]
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        out, err = io.StringIO(), io.StringIO()
+        code = ai_call.run("Привет", "m-test", env={"GEMINI_API_KEY": FAKE_KEY},
+                           log_path=self.log, out=out, err=err, sender=sender,
+                           sleep=self.sleeps.append)
+        return code, out.getvalue(), err.getvalue()
+
+    def _records(self):
+        with open(self.log, "r", encoding="utf-8") as f:
+            text = f.read()
+        self.assertNotIn(FAKE_KEY, text)
+        return [json.loads(line) for line in text.splitlines()]
+
+    def test_retry_on_503_then_ok(self):
+        code, out, err = self._run([_unavailable(), "ответ"])
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "ответ\n")
+        self.assertEqual(self.calls, 2)
+        self.assertEqual(self.sleeps, [5])
+        self.assertIn("Попытка 1/3", err)
+        records = self._records()
+        self.assertEqual([(r["attempt"], r["status"]) for r in records], [(1, "error"), (2, "ok")])
+        self.assertIn("503 UNAVAILABLE", records[0]["error"])
+
+    def test_retry_on_connect_error_then_ok(self):
+        code, out, err = self._run([ConnectError("[WinError 10054] reset"),
+                                    ConnectError("EOF occurred in violation of protocol"), "ок"])
+        self.assertEqual(code, 0)
+        self.assertEqual(self.sleeps, [5, 15])
+        self.assertEqual([r["attempt"] for r in self._records()], [1, 2, 3])
+
+    def test_retry_on_location_error(self):
+        code, _, _ = self._run([_location(), "ок"])
+        self.assertEqual(code, 0)
+        self.assertEqual(self.calls, 2)
+
+    def test_empty_after_retry_logs_attempt(self):
+        code, _, err = self._run([_unavailable(), "  "])
+        self.assertEqual(code, 1)
+        self.assertIn("Пустой ответ", err)
+        self.assertEqual([(r["attempt"], r["status"]) for r in self._records()],
+                         [(1, "error"), (2, "empty")])
+
+    def test_no_retry_on_429(self):
+        code, out, err = self._run([_quota(), "не должно дойти"])
+        self.assertEqual(code, 1)
+        self.assertEqual(self.calls, 1)
+        self.assertEqual(self.sleeps, [])
+        self.assertIn("429 RESOURCE_EXHAUSTED", err)
+        records = self._records()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["attempt"], 1)
+
+    def test_no_retry_on_other_4xx(self):
+        code, _, _ = self._run([ClientError(400, "INVALID_ARGUMENT", "bad"), "не должно дойти"])
+        self.assertEqual(code, 1)
+        self.assertEqual(self.calls, 1)
+
+    def test_stops_after_three_attempts(self):
+        code, out, err = self._run([_unavailable(), _unavailable(), _unavailable(), "лишняя"])
+        self.assertEqual(code, 1)
+        self.assertEqual(self.calls, 3)
+        self.assertEqual(self.sleeps, [5, 15])
+        self.assertEqual(out, "")
+        self.assertIn("попытка 3/3", err)
+        records = self._records()
+        self.assertEqual([(r["attempt"], r["status"]) for r in records],
+                         [(1, "error"), (2, "error"), (3, "error")])
+
+    def test_key_not_in_log_or_output_on_retries(self):
+        def leaky():
+            return ConnectError("failed for https://x/?key=" + FAKE_KEY)
+
+        code, out, err = self._run([leaky(), leaky(), leaky()])
+        self.assertEqual(code, 1)
+        self.assertNotIn(FAKE_KEY, out + err)
+        self.assertIn("***", err)
+        self.assertEqual(len(self._records()), 3)  # _records() проверяет и отсутствие ключа
 
 
 class ReviewPromptTest(unittest.TestCase):
@@ -345,6 +521,29 @@ class ReviewMainTest(unittest.TestCase):
         code = gemini_review.main(["--previous", self._path("r1.txt")])
         self.assertEqual(code, 2)
         self.assertEqual(self.sent, [])
+
+    def test_retry_goes_through_ai_call(self):
+        # Первая попытка — 503, вторая — ответ. Пауза подменена: тест не ждёт 5 с.
+        answers = [_unavailable(), "tools/x.py:1 — после повтора — low"]
+
+        def flaky(prompt, model, api_key):
+            self.sent.append(prompt)
+            answer = answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        with mock.patch.object(ai_call, "call_gemini", flaky), \
+                mock.patch.object(ai_call.time, "sleep") as fake_sleep:
+            code = gemini_review.main(["--out", self._path("r1.txt")])
+        self.assertEqual(code, 0)
+        self.assertEqual(len(self.sent), 2)
+        fake_sleep.assert_called_once_with(5)
+        self.assertEqual(self._read("r1.txt"), "tools/x.py:1 — после повтора — low\n")
+        with open(self.log, "r", encoding="utf-8") as f:
+            records = [json.loads(line) for line in f.read().splitlines()]
+        self.assertEqual([(r["tool"], r["attempt"], r["status"]) for r in records],
+                         [("gemini_review", 1, "error"), ("gemini_review", 2, "ok")])
 
     def test_bad_out_path_is_reported(self):
         bad = os.path.join(self.tmp.name, "нет_папки", "r1.txt")

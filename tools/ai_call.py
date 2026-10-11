@@ -15,11 +15,14 @@ google-genai 2.29.0 требует Python >= 3.10. Установка:
 
 Переменные окружения:
     GEMINI_API_KEY    — ключ (только отсюда; в код, вывод и журнал не попадает);
-    GEMINI_MODEL      — модель, по умолчанию gemini-3.1-pro-preview;
+    GEMINI_MODEL      — модель, по умолчанию gemini-3.8-flash (pro без оплаты даёт 429);
     GEMINI_MODEL_FAST — модель для --fast (значения по умолчанию нет).
 
-Каждый реальный вызов дописывает строку JSON в logs/gemini_calls.jsonl
-(время, модель, длина промпта, статус). --dry-run в журнал не пишет.
+Временные сбои (соединение/SSL, 5xx, плавающий 400 «User location is not supported»)
+повторяются: до 3 попыток, паузы 5 и 15 с. 429 (лимит) и прочие 4xx не повторяются.
+
+Каждая попытка дописывает строку JSON в logs/gemini_calls.jsonl (время, модель,
+длина промпта, статус, номер попытки attempt). --dry-run в журнал не пишет.
 
 Модуль импортируется и встроенным Python 3.7 (тесты), поэтому синтаксис 3.7,
 а google-genai импортируется только внутри call_gemini().
@@ -38,11 +41,22 @@ LOG_PATH = os.path.join(ROOT, "logs", "gemini_calls.jsonl")
 ENV_KEY = "GEMINI_API_KEY"
 ENV_MODEL = "GEMINI_MODEL"
 ENV_MODEL_FAST = "GEMINI_MODEL_FAST"
-DEFAULT_MODEL = "gemini-3.1-pro-preview"
+DEFAULT_MODEL = "gemini-3.8-flash"
 
 MAX_PROMPT_CHARS = 500000
 TIMEOUT_MS = 300000
 PREVIEW_CHARS = 2000
+
+MAX_ATTEMPTS = 3
+RETRY_DELAYS_S = (5, 15)  # пауза перед 2-й и 3-й попыткой
+LOCATION_ERROR = "User location is not supported"
+# Имена классов из MRO исключения: google-genai/httpx здесь не импортированы (тесты идут на 3.7).
+# httpx.ConnectError/ReadError — NetworkError; ssl.SSLError и ConnectionResetError (WinError 10054)
+# — на случай, если дойдут без обёртки httpx. ReadTimeout не повторяем: это уже TIMEOUT_MS ожидания.
+# Цена простоты: ReadError бывает и после отправки (повтор может второй раз потратить квоту),
+# а ошибка сертификата тоже SSLError — 3 бесполезные попытки. Для наших сбоев (10054, EOF) это ок.
+RETRYABLE_NETWORK_ERRORS = frozenset(
+    ["NetworkError", "ConnectTimeout", "RemoteProtocolError", "SSLError", "ConnectionError"])
 
 
 class AiCallError(Exception):
@@ -110,7 +124,7 @@ def describe_request(model, prompt, preview_chars=PREVIEW_CHARS):
 
 
 def make_log_record(model, prompt, status, duration_s=None, response=None, error=None,
-                    tool="ai_call", now=None):
+                    tool="ai_call", now=None, attempt=1):
     """Строка журнала. Ключа здесь нет и быть не может: его не передают в функцию."""
     now = now or datetime.datetime.now().astimezone()
     record = {
@@ -119,6 +133,7 @@ def make_log_record(model, prompt, status, duration_s=None, response=None, error
         "model": model,
         "prompt_chars": len(prompt),
         "status": status,
+        "attempt": attempt,
     }
     if duration_s is not None:
         record["duration_s"] = round(duration_s, 2)
@@ -155,6 +170,22 @@ def call_gemini(prompt, model, api_key, timeout_ms=TIMEOUT_MS):
     return response.text or ""  # None бывает при блокировке фильтром или MAX_TOKENS
 
 
+def is_retryable(exc):
+    """Стоит ли повторить запрос после exc. Сверено с google-genai 2.29.0: errors.APIError
+    (ClientError — 4xx, ServerError — 5xx) хранит HTTP-код в .code, текст ответа есть в str(exc).
+    """
+    names = set(cls.__name__ for cls in type(exc).__mro__)
+    if "APIError" in names:
+        code = getattr(exc, "code", None)
+        if not isinstance(code, int):
+            return False
+        if 500 <= code < 600:
+            return True
+        # 400 FAILED_PRECONDITION «User location is not supported» у нас плавает между попытками
+        return code == 400 and LOCATION_ERROR in str(exc)
+    return bool(names & RETRYABLE_NETWORK_ERRORS)
+
+
 def _safe_append_log(record, path, err):
     """Журнал не должен ронять скрипт: ответ уже получен и оплачен."""
     try:
@@ -164,11 +195,12 @@ def _safe_append_log(record, path, err):
 
 
 def run(prompt, model, dry_run=False, env=None, log_path=None, out=None, err=None,
-        sender=None, tool="ai_call"):
+        sender=None, tool="ai_call", sleep=None):
     """Выполнить запрос или dry-run. Возвращает код выхода (0 — успех).
 
     sender(prompt, model, api_key) -> текст ответа; по умолчанию call_gemini
     (в тестах подменяется, чтобы не ходить в сеть). log_path по умолчанию — LOG_PATH.
+    sleep(секунды) — пауза между попытками, по умолчанию time.sleep (в тестах подменяется).
     """
     log_path = LOG_PATH if log_path is None else log_path
     env = os.environ if env is None else env
@@ -184,27 +216,38 @@ def run(prompt, model, dry_run=False, env=None, log_path=None, out=None, err=Non
         return 2
 
     sender = call_gemini if sender is None else sender
-    started = time.time()
-    try:
-        text = sender(prompt, model, api_key)
-    except AiCallError as exc:
-        err.write("{}\n".format(exc))
-        return 2
-    except Exception as exc:  # любая ошибка сети/API идёт в журнал, а не в трассировку
-        message = redact("{}: {}".format(type(exc).__name__, exc), api_key)[:500]
-        _safe_append_log(make_log_record(model, prompt, "error", time.time() - started,
-                                         error=message, tool=tool), log_path, err)
-        err.write("Ошибка запроса к {}: {}\n".format(model, message))
-        return 1
+    sleep = time.sleep if sleep is None else sleep
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        started = time.time()
+        try:
+            text = sender(prompt, model, api_key)
+        except AiCallError as exc:
+            err.write("{}\n".format(exc))
+            return 2
+        except Exception as exc:  # любая ошибка сети/API идёт в журнал, а не в трассировку
+            message = redact("{}: {}".format(type(exc).__name__, exc), api_key)[:500]
+            _safe_append_log(make_log_record(model, prompt, "error", time.time() - started,
+                                             error=message, tool=tool, attempt=attempt),
+                             log_path, err)
+            if attempt < MAX_ATTEMPTS and is_retryable(exc):
+                delay = RETRY_DELAYS_S[attempt - 1]
+                err.write("Попытка {}/{} к {} не удалась: {}. Повтор через {} с.\n".format(
+                    attempt, MAX_ATTEMPTS, model, message, delay))
+                sleep(delay)
+                continue
+            err.write("Ошибка запроса к {} (попытка {}/{}): {}\n".format(
+                model, attempt, MAX_ATTEMPTS, message))
+            return 1
+        break
     duration = time.time() - started
     if not text.strip():
         _safe_append_log(make_log_record(model, prompt, "empty", duration, response=text,
-                                         tool=tool), log_path, err)
+                                         tool=tool, attempt=attempt), log_path, err)
         err.write("Пустой ответ от {} (фильтр безопасности или лимит токенов?).\n".format(model))
         return 1
     out.write(redact(text, api_key).rstrip("\n") + "\n")
-    _safe_append_log(make_log_record(model, prompt, "ok", duration, response=text, tool=tool),
-                     log_path, err)
+    _safe_append_log(make_log_record(model, prompt, "ok", duration, response=text, tool=tool,
+                                     attempt=attempt), log_path, err)
     return 0
 
 

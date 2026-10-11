@@ -1,4 +1,5 @@
 {
+  "language": "russian",
   "permissions": {
     "deny": [
       "Edit(/Win64/python3.7/**)",
