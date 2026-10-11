@@ -14,3 +14,17 @@ IMPORT_OK = "Файл открыт: {path}"
 EXPORT_OK = "Файл сохранён: {path}"
 IMPORT_FAILED = "Не удалось открыть файл {path}: {error}"
 EXPORT_FAILED = "Не удалось сохранить файл {path}: {error}"
+
+# Ошибки prepare_export_path
+ERR_EMPTY_PATH = "Путь для экспорта не может быть пустым."
+ERR_MISSING_EXT = "Не указано расширение файла для экспорта."
+ERR_BAD_DEFAULT_EXT = "Некорректное расширение файла по умолчанию."
+ERR_BAD_EXT = (
+    "Недопустимое расширение файла '{ext}'. "
+    "Допустимые расширения: {allowed}."
+)
+ERR_MISSING_DIR = "Каталог назначения не существует: '{path}'."
+ERR_IS_DIRECTORY = (
+    "Путь указывает на существующую папку, а не файл: '{path}'."
+)
+ERR_FILE_EXISTS = "Файл уже существует: '{path}'."

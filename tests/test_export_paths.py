@@ -26,7 +26,10 @@ class PrepareExportPathTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "модель"
 
-            with self.assertRaisesRegex(ValueError, "расширение"):
+            with self.assertRaisesRegex(
+                ValueError,
+                "Не указано расширение",
+            ):
                 prepare_export_path(path)
 
     def test_uppercase_step_extension_is_allowed(self):
@@ -37,6 +40,25 @@ class PrepareExportPathTests(unittest.TestCase):
 
             self.assertEqual(result, path)
             self.assertFalse(result.exists())
+
+    def test_uppercase_allowed_exts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "part.igs"
+
+            result = prepare_export_path(
+                path,
+                allowed_exts=(".IGS",),
+            )
+
+            self.assertEqual(result, path)
+            self.assertFalse(result.exists())
+
+    def test_path_none(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "не может быть пустым",
+        ):
+            prepare_export_path(None)
 
     def test_disallowed_txt_extension(self):
         with tempfile.TemporaryDirectory() as directory:
