@@ -33,7 +33,7 @@ py -m ruff check cad_io tests tools
 - [ ] ruff без замечаний для `cad_io/`, `tests/`, `tools/`
 - [ ] `git status --short` перед коммитом — только ожидаемые файлы
 - [ ] Не тронуты `Win64/python3.7/`, `Sources/`, `Win64/module/Assemble.py`
-- [ ] Изменения в `Win64/` (если есть) согласованы до правок; `git diff --numstat master -- Win64` — только ожидаемые строки
+- [ ] Изменения в `Win64/` (если есть) согласованы до правок; `git diff origin/master...HEAD -- Win64` — только ожидаемые строки
 - [ ] Функции OCC сверены с `Win64/python3.7/Lib/site-packages/OCC/Core/` (pythonocc 7.4)
 - [ ] Нет ключей и секретов в коде и выводе
 - [ ] Ревью: <!-- субагент reviewer / второе мнение Gemini / ручное — что нашли и что сделали -->
