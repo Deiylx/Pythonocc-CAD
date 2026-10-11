@@ -14,6 +14,7 @@ IMPORT_OK = "Файл открыт: {path}"
 EXPORT_OK = "Файл сохранён: {path}"
 IMPORT_FAILED = "Не удалось открыть файл {path}: {error}"
 EXPORT_FAILED = "Не удалось сохранить файл {path}: {error}"
+EXPORT_SCENE_FAILED = "Не удалось получить модель текущего окна: {error}"
 
 # Ошибки prepare_export_path
 ERR_EMPTY_PATH = "Путь для экспорта не может быть пустым."

@@ -86,6 +86,27 @@ class Registry(object):
     def writable(self):
         return [s for s in self._specs if s.can_write]
 
+    @staticmethod
+    def _patterns(spec):
+        return " ".join("*" + ext for ext in spec.extensions)
+
+    def filter_entry(self, spec):
+        """Запись фильтра QFileDialog для одного формата: "STEP (*.step *.stp)"."""
+        return "{} ({})".format(spec.name, self._patterns(spec))
+
+    def find_by_filter(self, entry):
+        """Формат по записи фильтра, которую вернул QFileDialog; не нашли — None.
+
+        Запись «Все поддерживаемые (...)» формата не задаёт — тоже None.
+        """
+        if not entry:
+            return None
+        entry = entry.strip()
+        for spec in self._specs:
+            if self.filter_entry(spec) == entry:
+                return spec
+        return None
+
     def qt_filter(self, mode="read", all_label=ALL_SUPPORTED):
         """Строка фильтра для QFileDialog.
 
@@ -101,9 +122,8 @@ class Registry(object):
         parts = []
         all_patterns = []
         for spec in specs:
-            patterns = " ".join("*" + ext for ext in spec.extensions)
-            all_patterns.append(patterns)
-            parts.append("{} ({})".format(spec.name, patterns))
+            all_patterns.append(self._patterns(spec))
+            parts.append(self.filter_entry(spec))
         if len(specs) > 1:
             parts.insert(0, "{} ({})".format(all_label, " ".join(all_patterns)))
         return ";;".join(parts)

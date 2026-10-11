@@ -9,6 +9,8 @@ from cad_io.strings import (
     ERR_IS_DIRECTORY,
     ERR_MISSING_DIR,
     ERR_MISSING_EXT,
+    NO_WRITER,
+    UNKNOWN_FORMAT,
 )
 
 
@@ -102,3 +104,51 @@ def prepare_export_path(
         )
 
     return export_path
+
+
+def choose_export_target(registry, raw_path, selected_filter=None):
+    """Выбрать формат и путь экспорта по ответу диалога «Сохранить как».
+
+    Параметры:
+        registry: реестр форматов (cad_io.registry.Registry).
+        raw_path: путь, который ввёл пользователь.
+        selected_filter: выбранная запись фильтра, например
+            "STEP (*.step *.stp)"; не распознана — формат по расширению.
+
+    Возвращает:
+        (FormatSpec, pathlib.Path).
+
+    Перезапись: если пользователь сам ввёл расширение, диалог Qt уже
+    спросил подтверждение — разрешаем; если расширение добавили мы —
+    существующий файл не затираем (FileExistsError).
+
+    Исключения: ValueError (пустой путь, нет расширения, неизвестный
+    формат, формат без записи, расширение не того формата) и исключения
+    prepare_export_path.
+    """
+    if raw_path is None:
+        raise ValueError(ERR_EMPTY_PATH)
+    raw_path = os.fspath(raw_path)
+    if isinstance(raw_path, bytes):
+        raw_path = os.fsdecode(raw_path)
+    if not raw_path.strip():
+        raise ValueError(ERR_EMPTY_PATH)
+    typed_ext = Path(raw_path).suffix
+
+    spec = registry.find_by_filter(selected_filter)
+    if spec is None:
+        if not typed_ext:
+            raise ValueError(ERR_MISSING_EXT)
+        spec = registry.find_by_extension(typed_ext)
+        if spec is None:
+            raise ValueError(UNKNOWN_FORMAT.format(ext=typed_ext))
+    if not spec.can_write:
+        raise ValueError(NO_WRITER.format(name=spec.name))
+
+    path = prepare_export_path(
+        raw_path,
+        allowed_exts=spec.extensions,
+        overwrite=bool(typed_ext),
+        default_ext=spec.extensions[0],
+    )
+    return spec, path

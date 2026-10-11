@@ -20,6 +20,7 @@ from Win64.Ribbon.TopBorderBarWidge import *
 from Win64.Ribbon.ViewLeaderWidget import *
 from PyQt5.QtCore import  Qt
 from Win64.module import DisplayManager,ModelTree,OCAFModule,InteractiveModule,ModuleWindowManager,PartOperate
+from cad_io import ui_bridge
 from Win64.sketcher import sketcher
 from Win64.surface import swept
 from Win64.manufacture import manufacturing
@@ -117,6 +118,7 @@ class Ui_MainWindow(MainGui.Ui_MainWindow):
 		self.Manufacturing=manufacturing.manufacturing(self)
 		#init partoperate module
 		self.PartOperate=PartOperate.PartOperate(self)
+		self.CadIO=ui_bridge.CadIOActions(self)
 		
 
 
