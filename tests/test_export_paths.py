@@ -124,6 +124,45 @@ class PrepareExportPathTests(unittest.TestCase):
             self.assertEqual(result, path)
             self.assertFalse(result.exists())
 
+    def test_default_ext_dot_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "модель"
+            with self.assertRaisesRegex(ValueError, "Некорректное расширение файла по умолчанию"):
+                prepare_export_path(path, default_ext=".")
+
+    def test_existing_directory_without_overwrite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "folder.step"
+            path.mkdir()
+            with self.assertRaisesRegex(IsADirectoryError, "существующую папку"):
+                prepare_export_path(path)
+
+    def test_existing_directory_with_overwrite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "folder.step"
+            path.mkdir()
+            with self.assertRaisesRegex(IsADirectoryError, "существующую папку"):
+                prepare_export_path(path, overwrite=True)
+            self.assertTrue(path.is_dir())
+
+    def test_whitespace_only_default_ext(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "модель"
+            with self.assertRaisesRegex(ValueError, "Не указано расширение"):
+                prepare_export_path(path, default_ext="   ")
+
+    def test_allowed_exts_as_string(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "a.igs"
+            result = prepare_export_path(path, allowed_exts=".igs")
+            self.assertEqual(result, path)
+
+    def test_allowed_exts_string_not_split_into_chars(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "a.i"
+            with self.assertRaisesRegex(ValueError, "Недопустимое расширение"):
+                prepare_export_path(path, allowed_exts="igs")
+
 
 if __name__ == "__main__":
     unittest.main()

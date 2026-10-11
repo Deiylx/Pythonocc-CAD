@@ -25,6 +25,27 @@ def prepare_export_path(
     overwrite=False,
     default_ext=None,
 ):
+    """Проверяет и нормализует путь для экспорта файла.
+
+    Параметры:
+        path: путь к файлу (str, Path или объект с ``__fspath__``).
+        allowed_exts: допустимые расширения (кортеж/список) либо одна
+            строка-расширение; регистр не важен.
+        overwrite: если False, существующий файл запрещён.
+        default_ext: расширение, если у ``path`` суффикса нет.
+
+    Возвращает:
+        pathlib.Path — готовый путь к файлу экспорта.
+
+    Исключения:
+        ValueError: пустой ``path``/``None``; нет расширения и нет
+            осмысленного ``default_ext``; ``default_ext`` только «.»;
+            расширение не из ``allowed_exts``.
+        FileNotFoundError: родительский каталог не существует.
+        IsADirectoryError: ``path`` указывает на существующую папку.
+        FileExistsError: файл уже есть и ``overwrite`` is False.
+        TypeError: ``path`` нельзя передать в ``os.fspath`` (не путь).
+    """
     if isinstance(allowed_exts, str):
         allowed_exts = (allowed_exts,)
 
