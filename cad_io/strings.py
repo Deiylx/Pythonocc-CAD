@@ -28,3 +28,10 @@ ERR_IS_DIRECTORY = (
     "Путь указывает на существующую папку, а не файл: '{path}'."
 )
 ERR_FILE_EXISTS = "Файл уже существует: '{path}'."
+
+# Ошибки конвертера STEP (cad_io/converters/step.py)
+ERR_STEP_EMPTY_SHAPE = "Нет модели для записи в STEP: форма пустая."
+ERR_STEP_WRITE_FAILED = "Не удалось записать файл STEP: '{path}'."
+ERR_STEP_FILE_NOT_FOUND = "Файл STEP не найден: '{path}'."
+ERR_STEP_READ_FAILED = "Не удалось прочитать файл STEP: '{path}'."
+ERR_STEP_NO_SHAPES = "В файле STEP нет геометрии: '{path}'."
