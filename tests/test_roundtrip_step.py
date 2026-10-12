@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from OCC.Core.Bnd import Bnd_Box
+from OCC.Core.BRepBndLib import brepbndlib_Add
 from OCC.Core.BRepGProp import brepgprop_VolumeProperties
 from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
 from OCC.Core.GProp import GProp_GProps
@@ -25,6 +27,7 @@ from cad_io.strings import (
 )
 
 BOX_VOLUME = 10.0 * 20.0 * 30.0
+BOX_SIZE = (10.0, 20.0, 30.0)
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # Запись и чтение в новом процессе: глобальное состояние OCCT ещё не тронуто другими тестами.
@@ -53,6 +56,41 @@ print("faces={}".format(faces))
 STEP_SCHEMA_AP214 = "FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));"
 STEP_SCHEMA_AP203 = "CONFIG_CONTROL_DESIGN"
 STEP_LENGTH_UNIT_MM = "LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.)"
+
+# Эталон «чистого процесса»: файл читает голый STEPControl_Reader без нашего кода,
+# xstep.cascade.unit — по умолчанию (MM). Так файл проверяется независимо от read_step.
+MEASURE_IN_CLEAN_PROCESS = """
+import sys
+from OCC.Core.Bnd import Bnd_Box
+from OCC.Core.BRepBndLib import brepbndlib_Add
+from OCC.Core.BRepGProp import brepgprop_VolumeProperties
+from OCC.Core.GProp import GProp_GProps
+from OCC.Core.IFSelect import IFSelect_RetDone
+from OCC.Core.STEPControl import STEPControl_Reader
+reader = STEPControl_Reader()
+assert reader.ReadFile(sys.argv[1]) == IFSelect_RetDone, "ReadFile"
+assert reader.TransferRoots() > 0, "TransferRoots"
+shape = reader.OneShape()
+props = GProp_GProps()
+brepgprop_VolumeProperties(shape, props)
+box = Bnd_Box()
+brepbndlib_Add(shape, box)
+xmin, ymin, zmin, xmax, ymax, zmax = box.Get()
+print("volume={!r}".format(props.Mass()))
+print("size={!r},{!r},{!r}".format(xmax - xmin, ymax - ymin, zmax - zmin))
+"""
+
+# read_step — первый вызов XSTEP в новом процессе: проверяет порядок
+# STEPControl_Controller_Init → SetCVal в самом read_step (без записи перед ним).
+READ_FIRST_IN_FRESH_PROCESS = """
+import sys
+from OCC.Core.BRepGProp import brepgprop_VolumeProperties
+from OCC.Core.GProp import GProp_GProps
+from cad_io.converters.step import read_step
+props = GProp_GProps()
+brepgprop_VolumeProperties(read_step(sys.argv[1]), props)
+print("volume={!r}".format(props.Mass()))
+"""
 
 IMPORT_DOES_NOT_REGISTER = """
 import cad_io
@@ -98,6 +136,13 @@ def volume(shape):
     props = GProp_GProps()
     brepgprop_VolumeProperties(shape, props)
     return props.Mass()
+
+
+def bounding_size(shape):
+    box = Bnd_Box()
+    brepbndlib_Add(shape, box)
+    xmin, ymin, zmin, xmax, ymax, zmax = box.Get()
+    return (xmax - xmin, ymax - ymin, zmax - zmin)
 
 
 def run_fresh_python(code, *args):
@@ -229,6 +274,100 @@ class StepFileContentTests(unittest.TestCase):
             text = self.write_box_text(directory)
 
         self.assertSchemaAndUnits(text)
+
+
+class StepCascadeUnitTests(unittest.TestCase):
+    """xstep.cascade.unit — единица модели в памяти, общая для STEP и IGES.
+
+    Чужой код (например, другой конвертер) мог выставить «M»: тогда OCCT считает
+    коробку 10×20×30 метровой и пишет в файл 10000×20000×30000 мм, а при чтении
+    делит размеры на 1000. write_step и read_step обязаны выставлять MM сами.
+    """
+
+    def setUp(self):
+        self.spec = register_builtin(Registry()).find_by_extension(".step")
+        STEPControl_Controller_Init()  # без него параметра xstep.cascade.unit ещё нет
+        name = "xstep.cascade.unit"
+        self.addCleanup(Interface_Static_SetCVal, name, Interface_Static_CVal(name))
+
+    def set_cascade_unit(self, unit):
+        self.assertTrue(Interface_Static_SetCVal("xstep.cascade.unit", unit))
+
+    def assertBoxSize(self, shape):
+        self.assertAlmostEqual(volume(shape), BOX_VOLUME, delta=1e-6 * BOX_VOLUME)
+        for actual, expected in zip(bounding_size(shape), BOX_SIZE):
+            self.assertAlmostEqual(actual, expected, delta=1e-3)
+
+    def measure_in_clean_process(self, path):
+        result = run_fresh_python(MEASURE_IN_CLEAN_PROCESS, str(path))
+        output = result.stdout.decode("utf-8", "replace")
+        self.assertEqual(result.returncode, 0, output)
+        values = {}
+        for line in output.splitlines():
+            key, sep, value = line.partition("=")
+            if sep and key in ("volume", "size"):
+                values[key] = value
+        self.assertIn("volume", values, output)
+        self.assertIn("size", values, output)
+        size = tuple(float(part) for part in values["size"].split(","))
+        return float(values["volume"]), size
+
+    def assertCleanProcessSeesBox(self, path):
+        measured_volume, size = self.measure_in_clean_process(path)
+        self.assertAlmostEqual(measured_volume, BOX_VOLUME, delta=1e-6 * BOX_VOLUME)
+        for actual, expected in zip(size, BOX_SIZE):
+            self.assertAlmostEqual(actual, expected, delta=1e-3)
+
+    def test_foreign_unit_before_write(self):
+        self.set_cascade_unit("M")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "box.step"
+            self.spec.writer(make_box(), path)
+            # Файл должен быть тем же, что пишет чистый процесс: 10×20×30 мм.
+            self.assertCleanProcessSeesBox(path)
+
+    def test_foreign_unit_before_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "box.step"
+            self.spec.writer(make_box(), path)
+            self.set_cascade_unit("M")
+            result = self.spec.reader(path)
+        self.assertBoxSize(result)
+
+    def test_foreign_unit_before_write_and_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "box.step"
+            self.set_cascade_unit("M")
+            self.spec.writer(make_box(), path)
+            self.set_cascade_unit("M")
+            result = self.spec.reader(path)
+            self.assertCleanProcessSeesBox(path)
+        self.assertBoxSize(result)
+
+    def test_write_under_m_read_under_mm(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "box.step"
+            self.set_cascade_unit("M")
+            self.spec.writer(make_box(), path)
+            self.set_cascade_unit("MM")
+            result = self.spec.reader(path)
+        self.assertBoxSize(result)
+
+    def test_read_first_in_fresh_process(self):
+        # Чтение без предшествующей записи в новом процессе: параметр xstep.cascade.unit
+        # появляется только после STEPControl_Controller_Init внутри read_step.
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "box.step"
+            self.spec.writer(make_box(), path)
+            result = run_fresh_python(READ_FIRST_IN_FRESH_PROCESS, str(path))
+        output = result.stdout.decode("utf-8", "replace")
+        self.assertEqual(result.returncode, 0, output)
+        volumes = [
+            float(line.partition("=")[2]) for line in output.splitlines()
+            if line.startswith("volume=")
+        ]
+        self.assertEqual(len(volumes), 1, output)
+        self.assertAlmostEqual(volumes[0], BOX_VOLUME, delta=1e-6 * BOX_VOLUME)
 
 
 class StepErrorTests(unittest.TestCase):
