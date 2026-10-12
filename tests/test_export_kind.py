@@ -45,16 +45,80 @@ class ExportFileKindTest(unittest.TestCase):
             self.actions.export_file()
         return dialog, message_box
 
-    def test_dialog_offers_only_3d_formats(self):
-        dialog, _ = self._export("", "")
+    def _offered_specs(self):
+        """Нажать «导出» и отменить диалог; вернуть форматы из его фильтра.
+
+        Запись «Все поддерживаемые (...)» формата не задаёт и пропускается;
+        любая другая запись обязана соответствовать формату реестра.
+        """
+        dialog, message_box = self._export("", "")
         dialog.getSaveFileName.assert_called_once()
+        message_box.warning.assert_not_called()
         offered = dialog.getSaveFileName.call_args[0][3]
-        self.assertEqual(offered, STEP_FILTER)
         self.assertNotIn("DXF", offered)
+        self.assertNotIn("*.dxf", offered)
+        specs = []
+        all_entries = []
+        for entry in offered.split(";;"):
+            spec = self.reg.find_by_filter(entry)
+            if spec is None:
+                self.assertTrue(entry.startswith(strings.ALL_SUPPORTED + " ("), entry)
+                all_entries.append(entry)
+                continue
+            specs.append(spec)
+        # В «Все поддерживаемые (...)» — ровно расширения предложенных форматов, без лишних.
+        for entry in all_entries:
+            patterns = entry[len(strings.ALL_SUPPORTED) + 2:-1].split()
+            expected = ["*" + ext for spec in specs for ext in spec.extensions]
+            self.assertCountEqual(patterns, expected)
+        return specs
+
+    def _assert_offers_writable_3d(self):
+        """Проверить фильтр диалога и вернуть имена предложенных форматов."""
+        specs = self._offered_specs()
+        for spec in specs:
+            self.assertEqual(spec.kind, "3d", spec)
+            self.assertTrue(spec.can_write, spec)
+        expected = [s for s in self.reg.formats() if s.kind == "3d" and s.can_write]
+        self.assertTrue(expected)
+        self.assertCountEqual(specs, expected)
+        return [spec.name for spec in specs]
+
+    def test_dialog_offers_only_3d_formats(self):
+        self._assert_offers_writable_3d()
+
+    def test_dialog_offers_all_writable_3d_formats(self):
+        # Без привязки к числу форматов: ещё один 3D с записью попадает в фильтр,
+        # 3D без записи и ещё один 2D — нет.
+        self.reg.register(FormatSpec("BREP", (".brep",), writer=mock.Mock(), kind="3d"))
+        self.reg.register(FormatSpec("IGES", (".iges", ".igs"), reader=mock.Mock(), kind="3d"))
+        self.reg.register(FormatSpec("SVG", (".svg",), writer=mock.Mock(), kind="2d"))
+        names = self._assert_offers_writable_3d()
+        self.assertIn("BREP", names)
+        self.assertNotIn("IGES", names)
+        self.assertNotIn("SVG", names)
 
     def test_2d_format_rejected_with_message(self):
         raw_path = str(self.dir / "part")
         _, message_box = self._export(raw_path, DXF_FILTER)
+        self.dxf_writer.assert_not_called()
+        self.step_writer.assert_not_called()
+        reason = strings.ERR_WRONG_KIND.format(
+            name="DXF",
+            spec_kind=strings.KIND_LABELS["2d"],
+            kind=strings.KIND_LABELS["3d"],
+        )
+        message_box.warning.assert_called_once_with(
+            self.main_window,
+            strings.EXPORT_TITLE,
+            strings.EXPORT_FAILED.format(path=raw_path, error=reason),
+        )
+        self.main_window.statusbar.showMessage.assert_not_called()
+
+    def test_dxf_typed_with_step_filter_reports_wrong_kind(self):
+        # В диалоге только STEP, пользователь ввёл part.dxf: Qt вернул фильтр STEP.
+        raw_path = str(self.dir / "part.dxf")
+        _, message_box = self._export(raw_path, STEP_FILTER)
         self.dxf_writer.assert_not_called()
         self.step_writer.assert_not_called()
         reason = strings.ERR_WRONG_KIND.format(

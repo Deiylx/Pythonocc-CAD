@@ -8,6 +8,15 @@ import os
 from cad_io.strings import ALL_SUPPORTED
 
 
+def check_kind(kind):
+    """Проверить аргумент kind фильтра или экспорта: "2d", "3d" или None (тип не важен).
+
+    Недопустимое значение — ошибка вызывающего кода (ValueError), а не выбор пользователя.
+    """
+    if kind is not None and kind not in ("2d", "3d"):
+        raise ValueError("kind должен быть '2d', '3d' или None: {!r}".format(kind))
+
+
 class FormatSpec(object):
     """Описание одного формата.
 
@@ -107,7 +116,7 @@ class Registry(object):
                 return spec
         return None
 
-    def qt_filter(self, mode="read", kind=None, all_label=ALL_SUPPORTED):
+    def qt_filter(self, mode="read", all_label=ALL_SUPPORTED, kind=None):
         """Строка фильтра для QFileDialog.
 
         Пример: "Все поддерживаемые (*.step *.stp);;STEP (*.step *.stp)".
@@ -120,9 +129,8 @@ class Registry(object):
             specs = self.writable()
         else:
             raise ValueError("mode должен быть 'read' или 'write': {!r}".format(mode))
+        check_kind(kind)
         if kind is not None:
-            if kind not in ("2d", "3d"):
-                raise ValueError("kind должен быть '2d', '3d' или None: {!r}".format(kind))
             specs = [s for s in specs if s.kind == kind]
         parts = []
         all_patterns = []

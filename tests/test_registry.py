@@ -97,6 +97,14 @@ class RegistryTest(unittest.TestCase):
         )
         self.assertEqual(self.reg.qt_filter("write", kind=None), self.reg.qt_filter("write"))
 
+    def test_qt_filter_all_label_stays_second_positional(self):
+        # Порядок параметров прежний: qt_filter(mode, all_label, kind); kind — после all_label.
+        self.assertEqual(
+            self.reg.qt_filter("write", "Метка"),
+            "Метка (*.step *.stp *.dxf);;STEP (*.step *.stp);;DXF (*.dxf)",
+        )
+        self.assertEqual(self.reg.qt_filter("write", "Метка", "3d"), "STEP (*.step *.stp)")
+
     def test_qt_filter_kind_3d_skips_2d_formats(self):
         # Остался один формат — записи «Все поддерживаемые» нет.
         self.assertEqual(self.reg.qt_filter("write", kind="3d"), "STEP (*.step *.stp)")

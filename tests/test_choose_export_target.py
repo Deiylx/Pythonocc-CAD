@@ -134,6 +134,58 @@ class ChooseExportTargetTest(unittest.TestCase):
             choose_export_target(self.reg, str(self.dir / "нет" / "part"), DXF_FILTER, kind="3d")
         self._assert_wrong_kind(ctx, "DXF", "2d", "3d")
 
+    def test_2d_extension_typed_with_3d_filter_rejected_as_wrong_kind(self):
+        # В диалоге только фильтр STEP, пользователь ввёл part.dxf: Qt вернул STEP_FILTER.
+        for name in ("part.dxf", "PART.DXF"):
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError) as ctx:
+                    choose_export_target(self.reg, str(self.dir / name), STEP_FILTER, kind="3d")
+                self._assert_wrong_kind(ctx, "DXF", "2d", "3d")
+                self.assertFalse((self.dir / name).exists())
+
+    def test_other_extension_typed_with_3d_filter_keeps_bad_ext(self):
+        # Формат того же типа (IGES) или неизвестное расширение — дело в расширении, не в типе.
+        for ext in (".igs", ".txt"):
+            with self.subTest(ext=ext):
+                with self.assertRaises(ValueError) as ctx:
+                    choose_export_target(
+                        self.reg, str(self.dir / ("part" + ext)), STEP_FILTER, kind="3d"
+                    )
+                self.assertEqual(
+                    str(ctx.exception),
+                    strings.ERR_BAD_EXT.format(ext=ext, allowed=".step, .stp"),
+                )
+
+    def test_2d_extension_typed_with_3d_filter_without_kind(self):
+        # Регрессия: без kind прежнее сообщение о расширении не того формата.
+        with self.assertRaises(ValueError) as ctx:
+            choose_export_target(self.reg, str(self.dir / "part.dxf"), STEP_FILTER)
+        self.assertEqual(
+            str(ctx.exception),
+            strings.ERR_BAD_EXT.format(ext=".dxf", allowed=".step, .stp"),
+        )
+
+    def test_bad_kind_rejected_like_qt_filter(self):
+        # Недопустимый kind — ошибка аргумента, как в Registry.qt_filter, а не «формат не подходит».
+        for kind in ("3D", "2d-ish", ""):
+            with self.subTest(kind=kind):
+                with self.assertRaises(ValueError) as filter_ctx:
+                    self.reg.qt_filter("write", kind=kind)
+                with self.assertRaises(ValueError) as ctx:
+                    choose_export_target(self.reg, str(self.dir / "part"), STEP_FILTER, kind=kind)
+                self.assertEqual(str(ctx.exception), str(filter_ctx.exception))
+                self.assertFalse((self.dir / "part.step").exists())
+
+    def test_bad_kind_checked_before_path(self):
+        # Ошибка аргумента видна раньше ошибок пути и формата.
+        with self.assertRaises(ValueError) as filter_ctx:
+            self.reg.qt_filter("write", kind="3D")
+        for raw in (None, "", str(self.dir / "part.xyz")):
+            with self.subTest(raw=raw):
+                with self.assertRaises(ValueError) as ctx:
+                    choose_export_target(self.reg, raw, None, kind="3D")
+                self.assertEqual(str(ctx.exception), str(filter_ctx.exception))
+
     def test_3d_format_rejected_for_2d_export(self):
         with self.assertRaises(ValueError) as ctx:
             choose_export_target(self.reg, str(self.dir / "sketch"), STEP_FILTER, kind="2d")
