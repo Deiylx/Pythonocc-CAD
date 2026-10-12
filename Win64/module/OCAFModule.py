@@ -158,6 +158,7 @@ class OCAF(object):
 				pass
 	
 	def Import_part(self):
+		Loadprocess = None
 		try:
 			index=self.parent.ModuleWindowManager.tabwidget.currentIndex()
 			name=self.parent.ModuleWindowManager.tabwidget.tabText(index)
@@ -235,7 +236,8 @@ class OCAF(object):
 			print(e)
 
 		finally:
-			Loadprocess.Close()
+			if Loadprocess is not None:
+				Loadprocess.Close()
 	
 	
 	def subject(self):
