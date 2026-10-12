@@ -25,14 +25,15 @@ def ask_open_path(parent=None, registry=REGISTRY):
     return path or None
 
 
-def ask_save_path(parent=None, registry=REGISTRY):
+def ask_save_path(parent=None, registry=REGISTRY, kind=None):
     """Показать диалог «Сохранить как».
 
+    kind ("3d" или "2d") оставляет в фильтре только форматы этого типа.
     Вернёт (путь, выбранная запись фильтра) или (None, None), если отменили.
     Формат и расширение по этой паре выбирает export_paths.choose_export_target.
     """
     path, selected_filter = QFileDialog.getSaveFileName(
-        parent, strings.EXPORT_TITLE, "", registry.qt_filter("write")
+        parent, strings.EXPORT_TITLE, "", registry.qt_filter("write", kind=kind)
     )
     if not path:
         return None, None
@@ -76,10 +77,13 @@ class CadIOActions(object):
         raw_path = ""
         try:
             shape = combine_shapes(shapes)
-            raw_path, selected_filter = ask_save_path(self.main_window, self.registry)
+            # Окно детали — 3D-модель: 2D-форматы (DXF) не предлагаем и не принимаем.
+            raw_path, selected_filter = ask_save_path(self.main_window, self.registry, kind="3d")
             if raw_path is None:
                 return
-            spec, path = choose_export_target(self.registry, raw_path, selected_filter)
+            spec, path = choose_export_target(
+                self.registry, raw_path, selected_filter, kind="3d"
+            )
             spec.writer(shape, path)
         except Exception as error:
             self._warn(strings.EXPORT_FAILED.format(path=raw_path, error=error))

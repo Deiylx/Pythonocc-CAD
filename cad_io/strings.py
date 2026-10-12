@@ -30,6 +30,13 @@ ERR_IS_DIRECTORY = (
 )
 ERR_FILE_EXISTS = "Файл уже существует: '{path}'."
 
+# Ошибка choose_export_target: тип формата (FormatSpec.kind) не совпал с типом модели
+KIND_LABELS = {"3d": "3D", "2d": "2D"}
+ERR_WRONG_KIND = (
+    "Формат {name} ({spec_kind}) не подходит для этой модели: "
+    "выберите формат {kind}."
+)
+
 # Ошибки конвертера STEP (cad_io/converters/step.py)
 ERR_STEP_EMPTY_SHAPE = "Нет модели для записи в STEP: форма пустая."
 ERR_STEP_WRITE_FAILED = "Не удалось записать файл STEP: '{path}'."
