@@ -157,12 +157,12 @@ class OCAF(object):
 			except:
 				pass
 	
-	def Import_part(self):
+	def Import_part(self, filepath=None):
 		Loadprocess = None
 		try:
 			index=self.parent.ModuleWindowManager.tabwidget.currentIndex()
 			name=self.parent.ModuleWindowManager.tabwidget.tabText(index)
-			self.chose_document = QFileDialog.getOpenFileName(self.parent, '导入文件', './',
+			self.chose_document = (filepath, "") if filepath else QFileDialog.getOpenFileName(self.parent, '导入文件', './',
 															  " STP files(*.stp , *.step);;IGES files(*.iges);;STL files(*.stl)")  # 选择转换的文价夹
 			filepath = self.chose_document[0]  # 获取打开文件夹路径
 			if os.path.exists(filepath):

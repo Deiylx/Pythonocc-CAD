@@ -80,6 +80,44 @@ class ImportPartCancelTest(unittest.TestCase):
         progress.Close.assert_called_once_with()
         self.assertIn("stl read failed", printed)
 
+    def test_path_argument_skips_dialog(self):
+        # Путь передаёт cad_io (CadIOActions.import_file): свой диалог не открывается.
+        missing = self._tmp_path("no_such_file.stp", create=False)
+        out = io.StringIO()
+        with mock.patch.object(OCAFModule, "QFileDialog") as dialog, \
+                mock.patch.object(OCAFModule, "ProcessWidgets") as widgets, \
+                contextlib.redirect_stdout(out):
+            self.ocaf.Import_part(missing)
+        dialog.getOpenFileName.assert_not_called()
+        widgets.ProcessWidget.assert_not_called()
+        self.assertEqual(out.getvalue(), "")
+
+    def test_path_argument_reaches_reader(self):
+        # Переданный путь доходит до чтения старым кодом (ветка STL).
+        path = self._tmp_path("model.stl", create=True)
+        self.parent.Displayshape_core_dict = {"Part1": mock.Mock()}
+        self.parent.modeltree_dict = {"Part1": mock.Mock()}
+        with mock.patch.object(OCAFModule, "QFileDialog") as dialog, \
+                mock.patch.object(OCAFModule, "ProcessWidgets"), \
+                mock.patch.object(OCAFModule, "QApplication"), \
+                mock.patch.object(OCAFModule, "NoDumpProcess"), \
+                mock.patch.object(OCAFModule, "read_stl_file") as read_stl, \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.ocaf.Import_part(path)
+        dialog.getOpenFileName.assert_not_called()
+        read_stl.assert_called_once_with(path)
+        display = self.parent.Displayshape_core_dict["Part1"].canva._display
+        display.DisplayShape.assert_called_once_with(read_stl.return_value)
+
+    def test_checked_false_still_opens_dialog(self):
+        # Сигнал triggered передаёт checked=False: тогда путь берётся из диалога, как раньше.
+        out = io.StringIO()
+        with mock.patch.object(OCAFModule, "QFileDialog") as dialog, \
+                contextlib.redirect_stdout(out):
+            dialog.getOpenFileName.return_value = ("", "")
+            self.ocaf.Import_part(False)
+        dialog.getOpenFileName.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
