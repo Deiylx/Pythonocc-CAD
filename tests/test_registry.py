@@ -88,6 +88,45 @@ class RegistryTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.reg.qt_filter("delete")
 
+    def test_qt_filter_without_kind_lists_all_kinds(self):
+        # Регрессия: без kind в фильтр записи попадают и 3D, и 2D форматы, как раньше.
+        self.assertEqual(
+            self.reg.qt_filter("write"),
+            strings.ALL_SUPPORTED + " (*.step *.stp *.dxf);;"
+            "STEP (*.step *.stp);;DXF (*.dxf)",
+        )
+        self.assertEqual(self.reg.qt_filter("write", kind=None), self.reg.qt_filter("write"))
+
+    def test_qt_filter_kind_3d_skips_2d_formats(self):
+        # Остался один формат — записи «Все поддерживаемые» нет.
+        self.assertEqual(self.reg.qt_filter("write", kind="3d"), "STEP (*.step *.stp)")
+
+    def test_qt_filter_kind_2d_skips_3d_formats(self):
+        self.assertEqual(self.reg.qt_filter("write", kind="2d"), "DXF (*.dxf)")
+
+    def test_qt_filter_kind_keeps_all_entry_for_several_formats(self):
+        self.reg.register(FormatSpec("BREP", (".brep",), writer=_writer))
+        self.assertEqual(
+            self.reg.qt_filter("write", kind="3d"),
+            strings.ALL_SUPPORTED + " (*.step *.stp *.brep);;"
+            "STEP (*.step *.stp);;BREP (*.brep)",
+        )
+
+    def test_qt_filter_kind_respects_mode(self):
+        # Чтение 2D: DXF без reader не попадает, других 2D нет — пустой фильтр.
+        self.assertEqual(self.reg.qt_filter("read", kind="2d"), "")
+        self.assertEqual(
+            self.reg.qt_filter("read", kind="3d"),
+            strings.ALL_SUPPORTED + " (*.step *.stp *.iges *.igs);;"
+            "STEP (*.step *.stp);;IGES (*.iges *.igs)",
+        )
+
+    def test_qt_filter_bad_kind(self):
+        for kind in ("3D", "2d-ish", ""):
+            with self.subTest(kind=kind):
+                with self.assertRaises(ValueError):
+                    self.reg.qt_filter("write", kind=kind)
+
     def test_filter_entry_lists_all_extensions(self):
         self.assertEqual(self.reg.filter_entry(self.iges), "IGES (*.iges *.igs)")
 

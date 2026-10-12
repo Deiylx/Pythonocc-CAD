@@ -9,6 +9,8 @@ from cad_io.strings import (
     ERR_IS_DIRECTORY,
     ERR_MISSING_DIR,
     ERR_MISSING_EXT,
+    ERR_WRONG_KIND,
+    KIND_LABELS,
     NO_WRITER,
     UNKNOWN_FORMAT,
 )
@@ -106,7 +108,7 @@ def prepare_export_path(
     return export_path
 
 
-def choose_export_target(registry, raw_path, selected_filter=None):
+def choose_export_target(registry, raw_path, selected_filter=None, kind=None):
     """Выбрать формат и путь экспорта по ответу диалога «Сохранить как».
 
     Параметры:
@@ -114,6 +116,8 @@ def choose_export_target(registry, raw_path, selected_filter=None):
         raw_path: путь, который ввёл пользователь.
         selected_filter: выбранная запись фильтра, например
             "STEP (*.step *.stp)"; не распознана — формат по расширению.
+        kind: тип экспортируемой модели ("3d" или "2d"); формат другого
+            типа — отказ. None — тип не проверяется.
 
     Возвращает:
         (FormatSpec, pathlib.Path).
@@ -123,8 +127,8 @@ def choose_export_target(registry, raw_path, selected_filter=None):
     существующий файл не затираем (FileExistsError).
 
     Исключения: ValueError (пустой путь, нет расширения, неизвестный
-    формат, формат без записи, расширение не того формата) и исключения
-    prepare_export_path.
+    формат, формат другого типа, формат без записи, расширение не того
+    формата) и исключения prepare_export_path.
     """
     if raw_path is None:
         raise ValueError(ERR_EMPTY_PATH)
@@ -142,6 +146,14 @@ def choose_export_target(registry, raw_path, selected_filter=None):
         spec = registry.find_by_extension(typed_ext)
         if spec is None:
             raise ValueError(UNKNOWN_FORMAT.format(ext=typed_ext))
+    if kind is not None and spec.kind != kind:
+        raise ValueError(
+            ERR_WRONG_KIND.format(
+                name=spec.name,
+                spec_kind=KIND_LABELS.get(spec.kind, spec.kind),
+                kind=KIND_LABELS.get(kind, kind),
+            )
+        )
     if not spec.can_write:
         raise ValueError(NO_WRITER.format(name=spec.name))
 
