@@ -88,6 +88,27 @@ class RegistryTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.reg.qt_filter("delete")
 
+    def test_filter_entry_lists_all_extensions(self):
+        self.assertEqual(self.reg.filter_entry(self.iges), "IGES (*.iges *.igs)")
+
+    def test_qt_filter_built_from_filter_entries(self):
+        self.assertEqual(
+            self.reg.qt_filter("write").split(";;")[1:],
+            [self.reg.filter_entry(self.step), self.reg.filter_entry(self.dxf)],
+        )
+
+    def test_find_by_filter(self):
+        self.assertIs(self.reg.find_by_filter("STEP (*.step *.stp)"), self.step)
+        self.assertIs(self.reg.find_by_filter("DXF (*.dxf)"), self.dxf)
+
+    def test_find_by_filter_unknown_or_all_entry_returns_none(self):
+        self.assertIsNone(self.reg.find_by_filter(None))
+        self.assertIsNone(self.reg.find_by_filter(""))
+        self.assertIsNone(self.reg.find_by_filter("BREP (*.brep)"))
+        self.assertIsNone(
+            self.reg.find_by_filter(strings.ALL_SUPPORTED + " (*.step *.stp *.dxf)")
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
