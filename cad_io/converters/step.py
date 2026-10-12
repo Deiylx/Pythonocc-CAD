@@ -4,6 +4,9 @@
 Проверяет только то, что относится к OCC: пустую форму и статусы записи и чтения.
 Расширение, папку назначения и перезапись проверяет вызывающий код
 (cad_io.export_paths.prepare_export_path).
+
+Побочный эффект: запись и чтение выставляют глобальный параметр OCCT xstep.cascade.unit = MM
+на весь процесс (он общий для STEP и IGES) и не возвращают прежнее значение.
 """
 
 import os
@@ -27,6 +30,8 @@ from cad_io.strings import (
 
 STEP_SCHEMA = "AP214IS"
 STEP_UNIT = "MM"
+# Единица длины модели в памяти. От неё OCCT пересчитывает размеры и при записи, и при чтении.
+CASCADE_UNIT = "MM"
 
 
 def write_step(shape, path):
@@ -47,6 +52,8 @@ def write_step(shape, path):
         raise OSError(ERR_STEP_WRITE_FAILED.format(path=path))
     if not Interface_Static_SetCVal("write.step.unit", STEP_UNIT):
         raise OSError(ERR_STEP_WRITE_FAILED.format(path=path))
+    if not Interface_Static_SetCVal("xstep.cascade.unit", CASCADE_UNIT):
+        raise OSError(ERR_STEP_WRITE_FAILED.format(path=path))
 
     # Схему writer запоминает при создании, поэтому создаём его после SetCVal.
     writer = STEPControl_Writer()
@@ -64,6 +71,12 @@ def read_step(path):
     path = os.fspath(path)
     if not os.path.isfile(path):
         raise FileNotFoundError(ERR_STEP_FILE_NOT_FOUND.format(path=path))
+
+    # Как и при записи: параметр xstep.cascade.unit есть только после инициализации
+    # контроллера, а чужое значение «M» изменило бы размеры прочитанной модели в 1000 раз.
+    STEPControl_Controller_Init()
+    if not Interface_Static_SetCVal("xstep.cascade.unit", CASCADE_UNIT):
+        raise ValueError(ERR_STEP_READ_FAILED.format(path=path))
 
     reader = STEPControl_Reader()
     if reader.ReadFile(path) != IFSelect_RetDone:
