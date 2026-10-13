@@ -13,7 +13,8 @@
 import math
 import os
 
-from OCC.Core.TopExp import TopExp_Explorer
+from OCC.Core.TopExp import topexp
+from OCC.Core.TopTools import TopTools_IndexedMapOfShape
 from OCC.Core.TopAbs import TopAbs_EDGE
 from OCC.Core.BRepAdaptor import BRepAdaptor_Curve
 from OCC.Core.GeomAbs import GeomAbs_Line, GeomAbs_Circle
@@ -50,19 +51,11 @@ TWO_PI = 2.0 * math.pi
 # ---------------------------------------------------------------------------
 
 def _iter_edges(shape):
-    """Перебрать уникальные топологические рёбра shape."""
-    exp = TopExp_Explorer(shape, TopAbs_EDGE)
-    seen = []
-
-    while exp.More():
-        edge = topods_Edge(exp.Current())
-
-        # IsSame проверяет, является ли это тем же топологическим ребром.
-        if not any(edge.IsSame(previous) for previous in seen):
-            seen.append(edge)
-            yield edge
-
-        exp.Next()
+    """Yield unique topology edges in Open CASCADE map order."""
+    edge_map = TopTools_IndexedMapOfShape()
+    topexp.MapShapes(shape, TopAbs_EDGE, edge_map)
+    for index in range(1, edge_map.Size() + 1):
+        yield topods_Edge(edge_map.FindKey(index))
 
 
 def _line_points_2d(curve):
@@ -208,6 +201,10 @@ def _make_arc(center, radius, start_deg, end_deg, ccw=True):
     """Создать дугу из DXF-углов; OCC получает возрастающий диапазон параметров."""
     ax = gp_Ax2(gp_Pnt(center[0], center[1], 0.0), gp_Dir(0.0, 0.0, 1.0))
     circ = gp_Circ(ax, radius)
+    # Normalize before converting: adding 2*pi may not change huge floats.
+    # Equal angles stay equal; the existing loops keep full-circle behavior.
+    start_deg = start_deg % 360.0
+    end_deg = end_deg % 360.0
     u1 = math.radians(start_deg)
     u2 = math.radians(end_deg)
 
@@ -280,8 +277,10 @@ def read_dxf(path):
 
     try:
         entities = parse_file(path)
-    except Exception as err:
-        raise ValueError(ERR_DXF_READ_FAILED.format(path=path)) from err
+    except ValueError as err:
+        raise ValueError(
+            ERR_DXF_READ_FAILED.format(path=path, error=err)
+        ) from err
 
     builder = BRep_Builder()
     compound = TopoDS_Compound()

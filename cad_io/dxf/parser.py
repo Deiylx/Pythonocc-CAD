@@ -15,6 +15,8 @@ from cad_io.dxf.entities import (
     DxfPolyline,
 )
 
+from cad_io.strings import ERR_DXF_UNSUPPORTED_OCS
+
 
 _MISSING = object()
 
@@ -96,6 +98,18 @@ def _closed_flag(data, entity):
     return bool(int(flags) & 1)
 
 
+def _validate_xy_ocs(data, entity):
+    """Reject entities whose OCS normal is not positive Z."""
+    nx = _field_float(data, 210, entity, "normal X", default=0.0)
+    ny = _field_float(data, 220, entity, "normal Y", default=0.0)
+    nz = _field_float(data, 230, entity, "normal Z", default=1.0)
+    normal = (nx, ny, nz)
+    if abs(nx) > 1e-9 or abs(ny) > 1e-9 or abs(nz - 1.0) > 1e-9:
+        raise ValueError(
+            ERR_DXF_UNSUPPORTED_OCS.format(entity=entity, normal=normal)
+        )
+
+
 def _parse_lwpolyline_verts(data):
     """Собрать точки и bulge из пар кодов LWPOLYLINE."""
     points = []
@@ -148,6 +162,7 @@ def _build_entity(etype, data):
         return DxfLine((x1, y1), (x2, y2), layer=layer)
 
     if etype == "CIRCLE":
+        _validate_xy_ocs(data, etype)
         cx = _field_float(data, 10, etype, "center X")
         cy = _field_float(data, 20, etype, "center Y")
         radius = _field_float(data, 40, etype, "radius")
@@ -156,6 +171,7 @@ def _build_entity(etype, data):
         return DxfCircle((cx, cy), radius, layer=layer)
 
     if etype == "ARC":
+        _validate_xy_ocs(data, etype)
         cx = _field_float(data, 10, etype, "center X")
         cy = _field_float(data, 20, etype, "center Y")
         radius = _field_float(data, 40, etype, "radius")
@@ -168,6 +184,7 @@ def _build_entity(etype, data):
         )
 
     if etype == "LWPOLYLINE":
+        _validate_xy_ocs(data, etype)
         points, bulges = _parse_lwpolyline_verts(data)
         if not points:
             return None
@@ -188,6 +205,7 @@ def _collect_polyline_r12(pairs, start_idx):
         header.append(pairs[i])
         i += 1
 
+    _validate_xy_ocs(header, "POLYLINE")
     layer = _first(header, 8, "0") or "0"
     closed = _closed_flag(header, "POLYLINE")
 

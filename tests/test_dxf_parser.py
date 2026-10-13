@@ -223,5 +223,45 @@ class DxfParserNumericValidationTests(unittest.TestCase):
             parse(text)
 
 
+    def test_negative_z_ocs_is_rejected_for_planar_entities(self):
+        cases = (
+            (
+                "ARC",
+                "0\nARC\n10\n0\n20\n0\n40\n2\n50\n0\n51\n90\n"
+                "210\n0\n220\n0\n230\n-1\n",
+            ),
+            (
+                "CIRCLE",
+                "0\nCIRCLE\n10\n0\n20\n0\n40\n2\n"
+                "210\n0\n220\n0\n230\n-1\n",
+            ),
+            (
+                "LWPOLYLINE",
+                "0\nLWPOLYLINE\n90\n2\n70\n0\n"
+                "10\n0\n20\n0\n10\n1\n20\n0\n"
+                "210\n0\n220\n0\n230\n-1\n",
+            ),
+            (
+                "POLYLINE",
+                "0\nPOLYLINE\n66\n1\n70\n0\n"
+                "210\n0\n220\n0\n230\n-1\n"
+                "0\nVERTEX\n10\n0\n20\n0\n"
+                "0\nVERTEX\n10\n1\n20\n0\n"
+                "0\nSEQEND\n",
+            ),
+        )
+        for entity, body in cases:
+            with self.subTest(entity=entity):
+                with self.assertRaisesRegex(ValueError, "OCS"):
+                    parse(_document(body))
+
+    def test_explicit_positive_z_ocs_is_supported(self):
+        text = _document(
+            "0\nARC\n10\n0\n20\n0\n40\n2\n50\n0\n51\n90\n"
+            "210\n0\n220\n0\n230\n1\n"
+        )
+        self.assertEqual(len(parse(text)), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

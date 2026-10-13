@@ -48,5 +48,9 @@ ERR_STEP_NO_SHAPES = "В файле STEP нет геометрии: '{path}'."
 ERR_DXF_EMPTY_SHAPE = "Нет модели для записи в DXF: форма пустая."
 ERR_DXF_WRITE_FAILED = "Не удалось записать файл DXF: '{path}'."
 ERR_DXF_FILE_NOT_FOUND = "Файл DXF не найден: '{path}'."
-ERR_DXF_READ_FAILED = "Не удалось прочитать файл DXF: '{path}'."
+ERR_DXF_READ_FAILED = "Не удалось прочитать файл DXF: '{path}'. Причина: {error}"
+ERR_DXF_UNSUPPORTED_OCS = (
+    "DXF: сущность {entity}: неподдерживаемая нормаль OCS {normal}; "
+    "поддерживается только (0, 0, 1)."
+)
 ERR_DXF_NO_SHAPES = "В файле DXF нет геометрии: '{path}'."
