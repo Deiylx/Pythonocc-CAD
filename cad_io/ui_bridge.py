@@ -3,16 +3,27 @@
 Диалоги выбора файла и действия для кнопок ленты (CadIOActions).
 Подключение к ленте (по согласованию с человеком, правка Win64/): создать
 self.CadIO=ui_bridge.CadIOActions(self) в Ui_MainWindow.__init__ (Win64/module/ShowGui.py)
-до init_ribbon() и указать connection=self.parent.CadIO.export_file в RibbonMain.ini.
+до init_ribbon() и указать connection=self.parent.CadIO.export_file в RibbonMain.ini,
+connection=self.parent.CadIO.import_file — в RibbonInit.ini и RibbonMain.ini.
 `from cad_io import ...` работает из приложения: start.bat -> init.bat делает
 `cd /d %~dp0` и запускает BrepCAD.py, поэтому корень репозитория — sys.path[0].
 """
 
-from PyQt5.QtWidgets import QFileDialog, QMessageBox
+import os
+
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from cad_io import strings
 from cad_io.export_paths import choose_export_target
 from cad_io.formats import register_builtin
+from cad_io.import_route import (
+    ROUTE_LEGACY,
+    base_name,
+    build_import_registry,
+    choose_import_route,
+    unique_name,
+)
 from cad_io.registry import REGISTRY
 from cad_io.scene import combine_shapes, displayed_shapes
 
@@ -55,8 +66,88 @@ class CadIOActions(object):
             return None
         return windows[name].canva._display.Context
 
-    def _warn(self, text):
-        QMessageBox.warning(self.main_window, strings.EXPORT_TITLE, text)
+    def _warn(self, text, title=strings.EXPORT_TITLE):
+        QMessageBox.warning(self.main_window, title, text)
+
+    def _open_part_window(self):
+        """Имя окна детали в текущей вкладке или None, если такого окна нет.
+
+        Текущую вкладку определяем так же, как OCAF.Import_part: tabText(currentIndex()).
+        """
+        name = self.main_window.ModuleWindowManager.GetWindownName()
+        if name in self.main_window.Displayshape_core_dict:
+            return name
+        return None
+
+    def _target_window(self, path):
+        """Окно для импорта: текущее окно детали, а если его нет — новое (как у «打开»)."""
+        name = self._open_part_window()
+        if name is not None:
+            return name
+        name = unique_name(base_name(path), self.main_window.Displayshape_core_dict)
+        # CreatePartWindown делает новую вкладку текущей; первая вкладка переключает ленту.
+        self.main_window.ModuleWindowManager.CreatePartWindown(name)
+        return name
+
+    def _show_shape(self, window_name, shape, path):
+        """Показать форму в окне детали: DisplayShape, FitAll, режимы выделения.
+
+        Как в старом импорте, но дерево модели (组合浏览器) для форматов реестра не строится.
+        """
+        window = self.main_window.Displayshape_core_dict[window_name]
+        display = window.canva._display
+        ais_shapes = display.DisplayShape(shape, update=True)
+        key = unique_name(base_name(path), window.shape_maneger_core_dict)
+        window.shape_maneger_core_dict[key] = ais_shapes[0]
+        display.FitAll()
+        self.main_window.InteractiveOperate.Setting()
+
+    def import_file(self, checked=False):
+        """Кнопка «导入»: открыть файл в текущем окне детали или, если его нет, в новом.
+
+        STEP, IGES и STL читает старый OCAF.Import_part (цвета и дерево модели как раньше),
+        остальные форматы — конвертер из реестра. checked передаёт сигнал triggered.
+        Исключения наружу не выпускаем: необработанное исключение в слоте PyQt5
+        может закрыть программу.
+        """
+        path = None
+        try:
+            import_registry = build_import_registry(self.registry)
+            path = ask_open_path(self.main_window, import_registry)
+            if path is None:
+                return
+            try:
+                route, spec = choose_import_route(import_registry, path)
+            except ValueError as error:
+                self._warn(str(error), strings.IMPORT_TITLE)
+                return
+            if not os.path.isfile(path):
+                self._warn(
+                    strings.ERR_IMPORT_FILE_NOT_FOUND.format(path=path), strings.IMPORT_TITLE
+                )
+                return
+            if route == ROUTE_LEGACY:
+                # Окно прогресса, сообщения и ошибки чтения — у старого кода, как раньше.
+                self._target_window(path)
+                self.main_window.OCAF.Import_part(path)
+                return
+            # Сначала читаем: при ошибке чтения пустое окно не создаётся.
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                shape = spec.reader(path)
+            finally:
+                QApplication.restoreOverrideCursor()
+            self._show_shape(self._target_window(path), shape, path)
+        except Exception as error:
+            self._warn(
+                strings.IMPORT_FAILED.format(path=path or "", error=error), strings.IMPORT_TITLE
+            )
+            return
+        try:
+            self.main_window.statusbar.showMessage(strings.IMPORT_OK.format(path=path))
+        except Exception:
+            # Модель уже показана: без строки состояния обходимся молча.
+            pass
 
     def export_file(self, checked=False):
         """Кнопка «导出»: сохранить модель текущего окна в формат из реестра.
