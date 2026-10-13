@@ -43,3 +43,10 @@ ERR_STEP_WRITE_FAILED = "Не удалось записать файл STEP: '{p
 ERR_STEP_FILE_NOT_FOUND = "Файл STEP не найден: '{path}'."
 ERR_STEP_READ_FAILED = "Не удалось прочитать файл STEP: '{path}'."
 ERR_STEP_NO_SHAPES = "В файле STEP нет геометрии: '{path}'."
+
+# Ошибки конвертера DXF (cad_io/converters/dxf.py)
+ERR_DXF_EMPTY_SHAPE = "Нет модели для записи в DXF: форма пустая."
+ERR_DXF_WRITE_FAILED = "Не удалось записать файл DXF: '{path}'."
+ERR_DXF_FILE_NOT_FOUND = "Файл DXF не найден: '{path}'."
+ERR_DXF_READ_FAILED = "Не удалось прочитать файл DXF: '{path}'."
+ERR_DXF_NO_SHAPES = "В файле DXF нет геометрии: '{path}'."
