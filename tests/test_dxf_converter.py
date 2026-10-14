@@ -151,7 +151,6 @@ class DxfConverterTests(unittest.TestCase):
                 with self.assertRaisesRegex(OSError, "access denied"):
                     read_dxf(str(path))
 
-
     def test_unsupported_or_empty_file_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "empty.dxf"

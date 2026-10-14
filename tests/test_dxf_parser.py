@@ -248,7 +248,6 @@ class DxfParserNumericValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "VERTEX"):
             parse(text)
 
-
     def test_negative_z_ocs_is_rejected_for_planar_entities(self):
         cases = (
             (

@@ -116,7 +116,7 @@ def _closed_flag(data, entity):
 
 
 def _validate_xy_ocs(data, entity):
-    """Reject entities whose OCS normal is not positive Z."""
+    """Отклонить сущности, нормаль OCS которых не направлена вдоль оси +Z."""
     nx = _field_float(data, 210, entity, "normal_x", default=0.0)
     ny = _field_float(data, 220, entity, "normal_y", default=0.0)
     nz = _field_float(data, 230, entity, "normal_z", default=1.0)

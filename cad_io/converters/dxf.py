@@ -51,7 +51,7 @@ TWO_PI = 2.0 * math.pi
 # ---------------------------------------------------------------------------
 
 def _iter_edges(shape):
-    """Yield unique topology edges in Open CASCADE map order."""
+    """Выдать уникальные топологические рёбра в порядке карты Open CASCADE."""
     edge_map = TopTools_IndexedMapOfShape()
     topexp.MapShapes(shape, TopAbs_EDGE, edge_map)
     for index in range(1, edge_map.Size() + 1):
@@ -170,6 +170,7 @@ def write_dxf(shape, path):
     except (IOError, OSError) as err:
         raise OSError(ERR_DXF_WRITE_FAILED.format(path=path)) from err
 
+
 # ---------------------------------------------------------------------------
 # Импорт: DXF -> TopoDS_Compound
 # ---------------------------------------------------------------------------
@@ -201,8 +202,9 @@ def _make_arc(center, radius, start_deg, end_deg, ccw=True):
     """Создать дугу из DXF-углов; OCC получает возрастающий диапазон параметров."""
     ax = gp_Ax2(gp_Pnt(center[0], center[1], 0.0), gp_Dir(0.0, 0.0, 1.0))
     circ = gp_Circ(ax, radius)
-    # Normalize before converting: adding 2*pi may not change huge floats.
-    # Equal angles stay equal; the existing loops keep full-circle behavior.
+    # Нормализуем углы до перевода: прибавление 2*pi может не изменить
+    # очень большие числа с плавающей точкой.
+    # Равные углы остаются равными; существующие циклы сохраняют полный круг.
     start_deg = start_deg % 360.0
     end_deg = end_deg % 360.0
     u1 = math.radians(start_deg)
@@ -269,7 +271,8 @@ def read_dxf(path):
     """Прочитать DXF и вернуть TopoDS_Compound с рёбрами.
 
     FileNotFoundError — файла нет.
-    ValueError — файл пустой или в нём нет поддерживаемых примитивов.
+    ValueError — ошибка разбора DXF, пустой файл или отсутствие
+    поддерживаемых примитивов.
     """
     path = os.fspath(path)
     if not os.path.isfile(path):
