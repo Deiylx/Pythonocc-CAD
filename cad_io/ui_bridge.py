@@ -39,7 +39,8 @@ def ask_open_path(parent=None, registry=REGISTRY):
 def ask_save_path(parent=None, registry=REGISTRY, kind=None):
     """Показать диалог «Сохранить как».
 
-    kind ("3d" или "2d") оставляет в фильтре только форматы этого типа.
+    kind ("3d" или "2d") ограничивает фильтр форматами этого типа;
+    None показывает все доступные форматы записи.
     Вернёт (путь, выбранная запись фильтра) или (None, None), если отменили.
     Формат и расширение по этой паре выбирает export_paths.choose_export_target.
     """
@@ -51,7 +52,6 @@ def ask_save_path(parent=None, registry=REGISTRY, kind=None):
         title,
         "",
         registry.qt_filter("write", kind=kind),
-        options=QFileDialog.DontUseNativeDialog,
     )
     if not path:
         return None, None
@@ -96,11 +96,12 @@ class CadIOActions(object):
     def _new_window(self, path):
         """Создать уникально названное окно детали по имени импортируемого файла."""
         name = unique_name(base_name(path), self.main_window.Displayshape_core_dict)
+        # CreatePartWindown делает новую вкладку текущей; первая вкладка переключает ленту.
         self.main_window.ModuleWindowManager.CreatePartWindown(name)
         return name
 
     def _show_shape(self, window_name, shape, path, top_view=False):
-        """Показать форму в окне детали: DisplayShape, FitAll, режимы выделения.
+        """Показать форму и подогнать масштаб; при top_view включить вид сверху.
 
         Как в старом импорте, но дерево модели (组合浏览器) для форматов реестра не строится.
         """

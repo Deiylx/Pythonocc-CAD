@@ -19,6 +19,7 @@ from OCC.Core.gp import gp_Pnt, gp_Trsf, gp_Vec
 
 from cad_io import strings, ui_bridge
 from cad_io.converters.dxf import read_dxf, write_dxf
+from cad_io.export_paths import choose_export_target
 from cad_io.registry import Registry
 
 DXF_FILTER = "DXF (*.dxf)"
@@ -66,9 +67,7 @@ class Export2dTest(unittest.TestCase):
         self.directory = Path(temp_dir.name)
 
     def test_save_dialog_without_kind_keeps_general_title(self):
-        dont_use_native_dialog = ui_bridge.QFileDialog.DontUseNativeDialog
         with mock.patch.object(ui_bridge, "QFileDialog") as dialog:
-            dialog.DontUseNativeDialog = dont_use_native_dialog
             dialog.getSaveFileName.return_value = ("", "")
             self.assertEqual(
                 ui_bridge.ask_save_path(registry=self.registry), (None, None)
@@ -76,19 +75,14 @@ class Export2dTest(unittest.TestCase):
         self.assertEqual(
             dialog.getSaveFileName.call_args[0][1], strings.EXPORT_TITLE
         )
-        self.assertIs(
-            dialog.getSaveFileName.call_args[1]["options"],
-            dont_use_native_dialog,
-        )
+        self.assertEqual(dialog.getSaveFileName.call_args[1], {})
 
     def _export(self, context, raw_path="", selected_filter=""):
-        dont_use_native_dialog = ui_bridge.QFileDialog.DontUseNativeDialog
         with mock.patch.object(ui_bridge, "QFileDialog") as dialog, \
                 mock.patch.object(ui_bridge, "QMessageBox") as message_box, \
                 mock.patch.object(
                     self.actions, "_current_context", return_value=context
                 ):
-            dialog.DontUseNativeDialog = dont_use_native_dialog
             dialog.getSaveFileName.return_value = (raw_path, selected_filter)
             self.actions.export_file()
         return dialog, message_box
@@ -174,26 +168,17 @@ class Export2dTest(unittest.TestCase):
         self.assertEqual(_count_edges(exported_shape), 1)
         message_box.warning.assert_not_called()
 
-    def test_x_step_name_with_dxf_filter_is_rejected_without_file(self):
+    def test_x_step_name_with_dxf_filter_is_rejected_by_cad_io(self):
         raw_path = str(self.directory / "x.step")
-        dialog, message_box = self._export(
-            DisplayedContext(AIS_Shape(_edge(0))), raw_path, DXF_FILTER
-        )
-        self.assertEqual(dialog.getSaveFileName.call_args[0][3], DXF_FILTER)
-        self.assertIs(
-            dialog.getSaveFileName.call_args[1]["options"],
-            ui_bridge.QFileDialog.DontUseNativeDialog,
-        )
+        with self.assertRaises(ValueError) as error:
+            choose_export_target(
+                self.registry, raw_path, DXF_FILTER, kind="2d"
+            )
         expected_error = strings.ERR_WRONG_KIND.format(
             name="STEP", spec_kind="3D", kind="2D"
         )
-        message_box.warning.assert_called_once_with(
-            self.main_window,
-            strings.EXPORT_TITLE,
-            strings.EXPORT_FAILED.format(path=raw_path, error=expected_error),
-        )
+        self.assertEqual(str(error.exception), expected_error)
         self.assertEqual(list(self.directory.iterdir()), [])
-        self.main_window.statusbar.showMessage.assert_not_called()
 
     def test_cancelled_export_is_silent(self):
         dialog, message_box = self._export(

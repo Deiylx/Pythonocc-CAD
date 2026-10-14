@@ -26,16 +26,17 @@ def _has_edge(shape):
     return TopExp_Explorer(shape, TopAbs_EDGE).More()
 
 
-
 def _collect_shapes(ais_list, kind):
     """Внутренний отбор форм с сохранением порядка объектов AIS."""
     shapes = []
+    # В OCC 7.4.0 AIS_ListOfInteractive не поддерживает обычную итерацию __iter__.
     it = AIS_ListIteratorOfListOfInteractive(ais_list)
 
     while it.More():
         ais_shape = Handle_AIS_Shape_DownCast(it.Value())
 
         if ais_shape is not None:
+            # Для пустого AIS_Shape обёртка pythonocc-core 7.4.0 может вернуть None из Shape().
             shape = ais_shape.Shape()
 
             if shape is not None and not shape.IsNull():
@@ -48,6 +49,8 @@ def _collect_shapes(ais_list, kind):
 
                 if keep:
                     if ais_shape.HasTransformation():
+                        # Shape() может не учитывать перенос AIS-объекта; применяем его
+                        # трансформацию, чтобы экспортировать геометрию в отображаемом месте.
                         shape = shape.Moved(
                             TopLoc_Location(ais_shape.Transformation())
                         )
@@ -87,6 +90,7 @@ def displayed_export_shapes(context):
     context.DisplayedObjects(ais_list)
 
     return export_kind_and_shapes(ais_list)
+
 
 def combine_shapes(shapes):
     """Одна форма — она сама; несколько — TopoDS_Compound.

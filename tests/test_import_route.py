@@ -59,14 +59,18 @@ class ImportRouteTest(unittest.TestCase):
 
     def test_2d_readable_format_is_offered_but_write_only_is_not(self):
         reg = Registry()
-        reg.register(FormatSpec("DXF", (".dxf",), reader=_reader, kind="2d"))
-        reg.register(FormatSpec("OUT", (".out",), writer=_writer))
-        combined = build_import_registry(reg)
-        self.assertEqual(
-            choose_import_route(combined, "drawing.dxf"),
-            (ROUTE_REGISTRY, combined.find_by_extension(".dxf")),
+        dxf_spec = reg.register(
+            FormatSpec("DXF", (".dxf",), reader=_reader, kind="2d")
         )
+        write_only_spec = reg.register(
+            FormatSpec("OUT", (".out",), writer=_writer)
+        )
+        combined = build_import_registry(reg)
+        route, spec = choose_import_route(combined, "a.DXF")
+        self.assertEqual(route, ROUTE_REGISTRY)
+        self.assertIs(spec, dxf_spec)
         self.assertIsNone(combined.find_by_extension(".out"))
+        self.assertNotIn(write_only_spec, combined.formats())
         self.assertIn("DXF (*.dxf)", combined.qt_filter("read").split(";;"))
 
     def test_unknown_extension_raises_with_message(self):
