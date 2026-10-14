@@ -27,7 +27,7 @@ def _legacy_reader(path):
 
 
 def build_import_registry(registry):
-    """Реестр для диалога «导入»: старые форматы и 3D-форматы реестра, которые можно читать.
+    """Реестр для диалога «导入»: старые форматы и читаемые форматы реестра.
 
     Формат реестра пропускается целиком, если хотя бы одно его расширение знает старый код.
     Исходный реестр не меняется.
@@ -36,8 +36,6 @@ def build_import_registry(registry):
     for name, extensions in LEGACY_IMPORT_FORMATS:
         combined.register(FormatSpec(name, extensions, reader=_legacy_reader, kind="3d"))
     for spec in registry.readable():
-        if spec.kind != "3d":
-            continue
         if any(combined.find_by_extension(ext) is not None for ext in spec.extensions):
             continue
         combined.register(spec)
