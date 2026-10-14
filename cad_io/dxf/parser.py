@@ -15,7 +15,20 @@ from cad_io.dxf.entities import (
     DxfPolyline,
 )
 
-from cad_io.strings import ERR_DXF_UNSUPPORTED_OCS
+from cad_io.strings import (
+    DXF_FIELD,
+    DXF_FIELD_NAMES,
+    ERR_DXF_BAD_NUMBER,
+    ERR_DXF_LWPOLYLINE_BULGE_FIRST,
+    ERR_DXF_LWPOLYLINE_NO_LAST_Y,
+    ERR_DXF_LWPOLYLINE_X_WITHOUT_Y,
+    ERR_DXF_LWPOLYLINE_Y_WITHOUT_X,
+    ERR_DXF_MISSING_FIELD,
+    ERR_DXF_NOT_FINITE,
+    ERR_DXF_NOT_INTEGER,
+    ERR_DXF_NOT_POSITIVE,
+    ERR_DXF_UNSUPPORTED_OCS,
+)
 
 
 _MISSING = object()
@@ -60,16 +73,12 @@ def _parse_float(value, description):
         number = float(value)
     except (TypeError, ValueError, OverflowError) as err:
         raise ValueError(
-            "DXF: некорректное числовое значение для {}: {!r}".format(
-                description, value
-            )
+            ERR_DXF_BAD_NUMBER.format(field=description, value=value)
         ) from err
 
     if not math.isfinite(number):
         raise ValueError(
-            "DXF: значение для {} должно быть конечным числом: {!r}".format(
-                description, value
-            )
+            ERR_DXF_NOT_FINITE.format(field=description, value=value)
         )
     return number
 
@@ -77,12 +86,16 @@ def _parse_float(value, description):
 def _field_float(data, code, entity, field, default=_MISSING):
     """Прочитать числовое поле сущности; default применяется только к пропуску."""
     value = _first(data, code, _MISSING)
-    description = "{} {}, group code {}".format(entity, field, code)
+    description = DXF_FIELD.format(
+        entity=entity,
+        name=DXF_FIELD_NAMES[field],
+        code=code,
+    )
 
     if value is _MISSING:
         if default is not _MISSING:
             return default
-        raise ValueError("DXF: отсутствует обязательное поле {}".format(description))
+        raise ValueError(ERR_DXF_MISSING_FIELD.format(field=description))
 
     return _parse_float(value, description)
 
@@ -91,18 +104,22 @@ def _closed_flag(data, entity):
     flags = _field_float(data, 70, entity, "flags", default=0.0)
     if not flags.is_integer():
         raise ValueError(
-            "DXF: поле {} flags (group code 70) должно быть целым числом".format(
-                entity
+            ERR_DXF_NOT_INTEGER.format(
+                field=DXF_FIELD.format(
+                    entity=entity,
+                    name=DXF_FIELD_NAMES["flags"],
+                    code=70,
+                )
             )
         )
     return bool(int(flags) & 1)
 
 
 def _validate_xy_ocs(data, entity):
-    """Reject entities whose OCS normal is not positive Z."""
-    nx = _field_float(data, 210, entity, "normal X", default=0.0)
-    ny = _field_float(data, 220, entity, "normal Y", default=0.0)
-    nz = _field_float(data, 230, entity, "normal Z", default=1.0)
+    """Отклонить сущности, нормаль OCS которых не направлена вдоль оси +Z."""
+    nx = _field_float(data, 210, entity, "normal_x", default=0.0)
+    ny = _field_float(data, 220, entity, "normal_y", default=0.0)
+    nz = _field_float(data, 230, entity, "normal_z", default=1.0)
     normal = (nx, ny, nz)
     if abs(nx) > 1e-9 or abs(ny) > 1e-9 or abs(nz - 1.0) > 1e-9:
         raise ValueError(
@@ -119,33 +136,46 @@ def _parse_lwpolyline_verts(data):
     for code, value in data:
         if code == 10:
             if pending_x is not None:
-                raise ValueError(
-                    "DXF: LWPOLYLINE: координата X без следующей координаты Y"
-                )
-            pending_x = _parse_float(value, "LWPOLYLINE coordinate X (code 10)")
+                raise ValueError(ERR_DXF_LWPOLYLINE_X_WITHOUT_Y)
+            pending_x = _parse_float(
+                value,
+                DXF_FIELD.format(
+                    entity="LWPOLYLINE",
+                    name=DXF_FIELD_NAMES["x"],
+                    code=10,
+                ),
+            )
         elif code == 20:
             if pending_x is None:
-                raise ValueError(
-                    "DXF: LWPOLYLINE: координата Y без предшествующей координаты X"
-                )
-            y = _parse_float(value, "LWPOLYLINE coordinate Y (code 20)")
+                raise ValueError(ERR_DXF_LWPOLYLINE_Y_WITHOUT_X)
+            y = _parse_float(
+                value,
+                DXF_FIELD.format(
+                    entity="LWPOLYLINE",
+                    name=DXF_FIELD_NAMES["y"],
+                    code=20,
+                ),
+            )
             points.append((pending_x, y))
             bulges.append(0.0)
             pending_x = None
         elif code == 42:
             # Отсутствие code 42 допустимо и означает прямой сегмент (bulge=0).
             # Но если поле присутствует, его значение обязано быть числом.
-            bulge = _parse_float(value, "LWPOLYLINE bulge (code 42)")
+            bulge = _parse_float(
+                value,
+                DXF_FIELD.format(
+                    entity="LWPOLYLINE",
+                    name=DXF_FIELD_NAMES["bulge"],
+                    code=42,
+                ),
+            )
             if not bulges:
-                raise ValueError(
-                    "DXF: LWPOLYLINE: bulge задан до первой вершины"
-                )
+                raise ValueError(ERR_DXF_LWPOLYLINE_BULGE_FIRST)
             bulges[-1] = bulge
 
     if pending_x is not None:
-        raise ValueError(
-            "DXF: LWPOLYLINE: отсутствует координата Y для последней вершины"
-        )
+        raise ValueError(ERR_DXF_LWPOLYLINE_NO_LAST_Y)
 
     return points, bulges
 
@@ -155,30 +185,46 @@ def _build_entity(etype, data):
     layer = _first(data, 8, "0") or "0"
 
     if etype == "LINE":
-        x1 = _field_float(data, 10, etype, "start X")
-        y1 = _field_float(data, 20, etype, "start Y")
-        x2 = _field_float(data, 11, etype, "end X")
-        y2 = _field_float(data, 21, etype, "end Y")
+        x1 = _field_float(data, 10, etype, "start_x")
+        y1 = _field_float(data, 20, etype, "start_y")
+        x2 = _field_float(data, 11, etype, "end_x")
+        y2 = _field_float(data, 21, etype, "end_y")
         return DxfLine((x1, y1), (x2, y2), layer=layer)
 
     if etype == "CIRCLE":
         _validate_xy_ocs(data, etype)
-        cx = _field_float(data, 10, etype, "center X")
-        cy = _field_float(data, 20, etype, "center Y")
+        cx = _field_float(data, 10, etype, "center_x")
+        cy = _field_float(data, 20, etype, "center_y")
         radius = _field_float(data, 40, etype, "radius")
         if radius <= 0.0:
-            raise ValueError("DXF: CIRCLE radius (group code 40) должен быть больше нуля")
+            raise ValueError(
+                ERR_DXF_NOT_POSITIVE.format(
+                    field=DXF_FIELD.format(
+                        entity=etype,
+                        name=DXF_FIELD_NAMES["radius"],
+                        code=40,
+                    )
+                )
+            )
         return DxfCircle((cx, cy), radius, layer=layer)
 
     if etype == "ARC":
         _validate_xy_ocs(data, etype)
-        cx = _field_float(data, 10, etype, "center X")
-        cy = _field_float(data, 20, etype, "center Y")
+        cx = _field_float(data, 10, etype, "center_x")
+        cy = _field_float(data, 20, etype, "center_y")
         radius = _field_float(data, 40, etype, "radius")
-        start_angle = _field_float(data, 50, etype, "start angle")
-        end_angle = _field_float(data, 51, etype, "end angle")
+        start_angle = _field_float(data, 50, etype, "start_angle")
+        end_angle = _field_float(data, 51, etype, "end_angle")
         if radius <= 0.0:
-            raise ValueError("DXF: ARC radius (group code 40) должен быть больше нуля")
+            raise ValueError(
+                ERR_DXF_NOT_POSITIVE.format(
+                    field=DXF_FIELD.format(
+                        entity=etype,
+                        name=DXF_FIELD_NAMES["radius"],
+                        code=40,
+                    )
+                )
+            )
         return DxfArc(
             (cx, cy), radius, start_angle, end_angle, layer=layer
         )
@@ -220,8 +266,8 @@ def _collect_polyline_r12(pairs, start_idx):
                 vertex_data.append(pairs[i])
                 i += 1
 
-            x = _field_float(vertex_data, 10, "VERTEX", "X")
-            y = _field_float(vertex_data, 20, "VERTEX", "Y")
+            x = _field_float(vertex_data, 10, "VERTEX", "x")
+            y = _field_float(vertex_data, 20, "VERTEX", "y")
             bulge = _field_float(
                 vertex_data, 42, "VERTEX", "bulge", default=0.0
             )

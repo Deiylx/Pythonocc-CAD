@@ -1,11 +1,28 @@
 # -*- coding: utf-8 -*-
 import io
+import re
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from cad_io.dxf import parse, parse_file
+from cad_io.dxf import parser as dxf_parser
 from cad_io.dxf.entities import DxfLine, DxfPolyline
+from cad_io.strings import (
+    DXF_FIELD,
+    DXF_FIELD_NAMES,
+    ERR_DXF_BAD_NUMBER,
+    ERR_DXF_LWPOLYLINE_BULGE_FIRST,
+    ERR_DXF_LWPOLYLINE_NO_LAST_Y,
+    ERR_DXF_LWPOLYLINE_X_WITHOUT_Y,
+    ERR_DXF_LWPOLYLINE_Y_WITHOUT_X,
+    ERR_DXF_MISSING_FIELD,
+    ERR_DXF_NOT_FINITE,
+    ERR_DXF_NOT_INTEGER,
+    ERR_DXF_NOT_POSITIVE,
+)
+import cad_io.strings as dxf_strings
 
 
 def _write(path, text, encoding="utf-8"):
@@ -201,8 +218,17 @@ class DxfParserNumericValidationTests(unittest.TestCase):
             "0\nLWPOLYLINE\n10\n0\n20\n0\n42\nNaN\n"
             "10\n1\n20\n0\n"
         )
-        with self.assertRaisesRegex(ValueError, "bulge"):
+        field = DXF_FIELD.format(
+            entity="LWPOLYLINE",
+            name=DXF_FIELD_NAMES["bulge"],
+            code=42,
+        )
+        with self.assertRaises(ValueError) as ctx:
             parse(text)
+        self.assertEqual(
+            str(ctx.exception),
+            ERR_DXF_NOT_FINITE.format(field=field, value="NaN"),
+        )
 
     def test_missing_bulge_still_means_straight_segment(self):
         text = _document(
@@ -221,7 +247,6 @@ class DxfParserNumericValidationTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "VERTEX"):
             parse(text)
-
 
     def test_negative_z_ocs_is_rejected_for_planar_entities(self):
         cases = (
@@ -261,6 +286,163 @@ class DxfParserNumericValidationTests(unittest.TestCase):
             "210\n0\n220\n0\n230\n1\n"
         )
         self.assertEqual(len(parse(text)), 1)
+
+
+class DxfParserMessageTests(unittest.TestCase):
+
+    @staticmethod
+    def _field(entity, name_key, code):
+        return DXF_FIELD.format(
+            entity=entity,
+            name=DXF_FIELD_NAMES[name_key],
+            code=code,
+        )
+
+    def test_arc_missing_end_angle_uses_message_template(self):
+        text = _document(
+            "0\nARC\n10\n0\n20\n0\n40\n2\n50\n0\n"
+        )
+        with self.assertRaises(ValueError) as ctx:
+            parse(text)
+        self.assertEqual(
+            str(ctx.exception),
+            ERR_DXF_MISSING_FIELD.format(
+                field=self._field("ARC", "end_angle", 51)
+            ),
+        )
+
+    def test_arc_bad_end_angle_uses_message_template(self):
+        text = _document(
+            "0\nARC\n10\n0\n20\n0\n40\n2\n"
+            "50\n0\n51\nbad\n"
+        )
+        with self.assertRaises(ValueError) as ctx:
+            parse(text)
+        self.assertEqual(
+            str(ctx.exception),
+            ERR_DXF_BAD_NUMBER.format(
+                field=self._field("ARC", "end_angle", 51),
+                value="bad",
+            ),
+        )
+
+    def test_line_infinite_coordinate_uses_message_template(self):
+        text = _document(
+            "0\nLINE\n10\n0\n20\ninf\n11\n1\n21\n1\n"
+        )
+        with self.assertRaises(ValueError) as ctx:
+            parse(text)
+        self.assertEqual(
+            str(ctx.exception),
+            ERR_DXF_NOT_FINITE.format(
+                field=self._field("LINE", "start_y", 20),
+                value="inf",
+            ),
+        )
+
+    def test_lwpolyline_noninteger_flags_use_message_template(self):
+        text = _document(
+            "0\nLWPOLYLINE\n90\n2\n70\n1.5\n"
+            "10\n0\n20\n0\n10\n1\n20\n0\n"
+        )
+        with self.assertRaises(ValueError) as ctx:
+            parse(text)
+        self.assertEqual(
+            str(ctx.exception),
+            ERR_DXF_NOT_INTEGER.format(
+                field=self._field("LWPOLYLINE", "flags", 70)
+            ),
+        )
+
+    def test_circle_and_arc_zero_radius_use_message_template(self):
+        cases = (
+            (
+                "CIRCLE",
+                "0\nCIRCLE\n10\n0\n20\n0\n40\n0\n",
+            ),
+            (
+                "ARC",
+                "0\nARC\n10\n0\n20\n0\n40\n0\n"
+                "50\n0\n51\n90\n",
+            ),
+        )
+        for entity, body in cases:
+            with self.subTest(entity=entity):
+                with self.assertRaises(ValueError) as ctx:
+                    parse(_document(body))
+                self.assertEqual(
+                    str(ctx.exception),
+                    ERR_DXF_NOT_POSITIVE.format(
+                        field=self._field(entity, "radius", 40)
+                    ),
+                )
+
+    def test_lwpolyline_structural_errors_use_message_templates(self):
+        cases = (
+            (
+                "10\n0\n10\n1\n20\n0\n",
+                ERR_DXF_LWPOLYLINE_X_WITHOUT_Y,
+            ),
+            (
+                "20\n0\n",
+                ERR_DXF_LWPOLYLINE_Y_WITHOUT_X,
+            ),
+            (
+                "42\n0.5\n10\n0\n20\n0\n",
+                ERR_DXF_LWPOLYLINE_BULGE_FIRST,
+            ),
+            (
+                "10\n0\n",
+                ERR_DXF_LWPOLYLINE_NO_LAST_Y,
+            ),
+        )
+        for fields, expected in cases:
+            with self.subTest(fields=fields):
+                with self.assertRaises(ValueError) as ctx:
+                    parse(_document("0\nLWPOLYLINE\n" + fields))
+                self.assertEqual(str(ctx.exception), expected)
+
+    def test_bad_number_constant_can_be_patched_on_parser_module(self):
+        text = _document(
+            "0\nARC\n10\n0\n20\n0\n40\n2\n"
+            "50\n0\n51\nbad\n"
+        )
+        field = self._field("ARC", "end_angle", 51)
+        with mock.patch.object(
+            dxf_parser,
+            "ERR_DXF_BAD_NUMBER",
+            "ПОДМЕНА {field} {value!r}",
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                parse(text)
+        self.assertEqual(
+            str(ctx.exception),
+            "ПОДМЕНА {field} {value!r}".format(
+                field=field,
+                value="bad",
+            ),
+        )
+
+    def test_dxf_error_constants_contain_no_english_words(self):
+        allowed = {
+            "DXF", "LINE", "CIRCLE", "ARC", "LWPOLYLINE", "POLYLINE",
+            "VERTEX", "OCS", "X", "Y", "Z",
+        }
+        values = [DXF_FIELD]
+        values.extend(DXF_FIELD_NAMES.values())
+        values.extend(
+            getattr(dxf_strings, name)
+            for name in dir(dxf_strings)
+            if name.startswith("ERR_DXF_")
+        )
+        for value in values:
+            without_placeholders = re.sub(r"\{[^{}]*\}", "", value)
+            words = re.findall(r"[A-Za-z]+", without_placeholders)
+            unexpected = [
+                word for word in words if word.upper() not in allowed
+            ]
+            with self.subTest(value=value):
+                self.assertEqual(unexpected, [])
 
 
 if __name__ == "__main__":
