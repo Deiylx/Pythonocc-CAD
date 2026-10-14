@@ -20,6 +20,9 @@ from OCC.Core.TopoDS import TopoDS_Compound, TopoDS_Shape, topods_Edge
 from cad_io.converters.dxf import _iter_edges, read_dxf, write_dxf
 from cad_io.dxf import DxfWriter
 from cad_io.strings import (
+    DXF_FIELD,
+    DXF_FIELD_NAMES,
+    ERR_DXF_BAD_NUMBER,
     ERR_DXF_EMPTY_SHAPE,
     ERR_DXF_FILE_NOT_FOUND,
     ERR_DXF_NO_SHAPES,
@@ -116,7 +119,20 @@ class DxfConverterTests(unittest.TestCase):
             with self.assertRaises(ValueError) as ctx:
                 read_dxf(str(path))
             self.assertIn(str(path), str(ctx.exception))
-            self.assertIn("end angle", str(ctx.exception))
+            parse_reason = ERR_DXF_BAD_NUMBER.format(
+                field=DXF_FIELD.format(
+                    entity="ARC",
+                    name=DXF_FIELD_NAMES["end_angle"],
+                    code=51,
+                ),
+                value="bad",
+            )
+            self.assertEqual(
+                str(ctx.exception),
+                ERR_DXF_READ_FAILED.format(
+                    path=str(path), error=parse_reason
+                ),
+            )
             self.assertTrue(
                 str(ctx.exception).startswith(
                     ERR_DXF_READ_FAILED.split("{path}")[0]
