@@ -39,7 +39,11 @@ class ExportFileKindTest(unittest.TestCase):
         with mock.patch.object(ui_bridge, "QFileDialog") as dialog, \
                 mock.patch.object(ui_bridge, "QMessageBox") as message_box, \
                 mock.patch.object(self.actions, "_current_context", return_value=object()), \
-                mock.patch.object(ui_bridge, "displayed_shapes", return_value=[self.shape]), \
+                mock.patch.object(
+                    ui_bridge,
+                    "displayed_export_shapes",
+                    return_value=("3d", [self.shape]),
+                ), \
                 mock.patch.object(ui_bridge, "combine_shapes", return_value=self.shape):
             dialog.getSaveFileName.return_value = (raw_path, selected_filter)
             self.actions.export_file()

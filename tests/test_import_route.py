@@ -57,13 +57,17 @@ class ImportRouteTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self._route("a.abc", reg)
 
-    def test_2d_and_write_only_formats_are_not_offered(self):
+    def test_2d_readable_format_is_offered_but_write_only_is_not(self):
         reg = Registry()
         reg.register(FormatSpec("DXF", (".dxf",), reader=_reader, kind="2d"))
         reg.register(FormatSpec("OUT", (".out",), writer=_writer))
         combined = build_import_registry(reg)
-        self.assertIsNone(combined.find_by_extension(".dxf"))
+        self.assertEqual(
+            choose_import_route(combined, "drawing.dxf"),
+            (ROUTE_REGISTRY, combined.find_by_extension(".dxf")),
+        )
         self.assertIsNone(combined.find_by_extension(".out"))
+        self.assertIn("DXF (*.dxf)", combined.qt_filter("read").split(";;"))
 
     def test_unknown_extension_raises_with_message(self):
         with self.assertRaises(ValueError) as ctx:

@@ -1,7 +1,7 @@
 """Формы для экспорта из сцены окна (AIS_InteractiveContext).
 
-Без Qt. Берём показанные AIS_Shape, у которых есть хотя бы одна грань:
-рёбра эскиза, оси, базовые плоскости, куб вида и точки пропускаются.
+Без Qt. Отбираем показанные AIS_Shape для 3D- или 2D-экспорта;
+оси, базовые плоскости, куб вида и точки пропускаются.
 """
 
 from OCC.Core.AIS import (
@@ -10,7 +10,7 @@ from OCC.Core.AIS import (
     Handle_AIS_Shape_DownCast,
 )
 from OCC.Core.BRep import BRep_Builder
-from OCC.Core.TopAbs import TopAbs_FACE
+from OCC.Core.TopAbs import TopAbs_EDGE, TopAbs_FACE
 from OCC.Core.TopExp import TopExp_Explorer
 from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Core.TopoDS import TopoDS_Compound
@@ -22,32 +22,71 @@ def _has_face(shape):
     return TopExp_Explorer(shape, TopAbs_FACE).More()
 
 
-def shapes_from_ais_list(ais_list):
-    """Список TopoDS_Shape из AIS_ListOfInteractive: только непустые AIS_Shape с гранями."""
+def _has_edge(shape):
+    return TopExp_Explorer(shape, TopAbs_EDGE).More()
+
+
+
+def _collect_shapes(ais_list, kind):
+    """Внутренний отбор форм с сохранением порядка объектов AIS."""
     shapes = []
-    # У AIS_ListOfInteractive в 7.4 нет __iter__: обходим итератором.
     it = AIS_ListIteratorOfListOfInteractive(ais_list)
+
     while it.More():
         ais_shape = Handle_AIS_Shape_DownCast(it.Value())
+
         if ais_shape is not None:
-            # Для пустой формы обёртка 7.4 возвращает из Shape() None, а не пустую форму.
             shape = ais_shape.Shape()
-            if shape is not None and not shape.IsNull() and _has_face(shape):
-                # Shape() не учитывает перенос объекта (Context.SetLocation, сопряжения
-                # в сборке): применяем преобразование, иначе деталь уйдёт на старое место.
-                if ais_shape.HasTransformation():
-                    shape = shape.Moved(TopLoc_Location(ais_shape.Transformation()))
-                shapes.append(shape)
+
+            if shape is not None and not shape.IsNull():
+                has_face = _has_face(shape)
+
+                if kind == "3d":
+                    keep = has_face
+                else:
+                    keep = not has_face and _has_edge(shape)
+
+                if keep:
+                    if ais_shape.HasTransformation():
+                        shape = shape.Moved(
+                            TopLoc_Location(ais_shape.Transformation())
+                        )
+                    shapes.append(shape)
+
         it.Next()
+
     return shapes
 
 
-def displayed_shapes(context):
-    """Формы для экспорта из всех объектов, показанных в AIS_InteractiveContext."""
+def shapes_from_ais_list(ais_list, kind="3d"):
+    """Выбрать формы с гранями (3D) либо рёбрами без граней (2D)."""
+    if kind not in ("3d", "2d"):
+        raise ValueError("kind должен быть '3d' или '2d'")
+
+    return _collect_shapes(ais_list, kind)
+
+
+def export_kind_and_shapes(ais_list):
+    """Определить тип экспорта и вернуть подходящие формы."""
+    shapes_3d = shapes_from_ais_list(ais_list, kind="3d")
+
+    if shapes_3d:
+        return "3d", shapes_3d
+
+    shapes_2d = shapes_from_ais_list(ais_list, kind="2d")
+
+    if shapes_2d:
+        return "2d", shapes_2d
+
+    return None, []
+
+
+def displayed_export_shapes(context):
+    """Определить тип экспорта по отображаемым объектам окна."""
     ais_list = AIS_ListOfInteractive()
     context.DisplayedObjects(ais_list)
-    return shapes_from_ais_list(ais_list)
 
+    return export_kind_and_shapes(ais_list)
 
 def combine_shapes(shapes):
     """Одна форма — она сама; несколько — TopoDS_Compound.

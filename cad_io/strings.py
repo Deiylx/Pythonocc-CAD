@@ -4,6 +4,7 @@ ALL_SUPPORTED = "Все поддерживаемые"
 
 IMPORT_TITLE = "Импорт файла"
 EXPORT_TITLE = "Экспорт файла"
+EXPORT_TITLE_KIND = "Экспорт файла ({kind})"
 
 UNKNOWN_FORMAT = "Формат файла не поддерживается: {ext}"
 NO_READER = "Формат {name} нельзя открыть, только сохранить"

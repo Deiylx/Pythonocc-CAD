@@ -25,7 +25,7 @@ from cad_io.import_route import (
     unique_name,
 )
 from cad_io.registry import REGISTRY
-from cad_io.scene import combine_shapes, displayed_shapes
+from cad_io.scene import combine_shapes, displayed_export_shapes
 
 
 def ask_open_path(parent=None, registry=REGISTRY):
@@ -43,8 +43,15 @@ def ask_save_path(parent=None, registry=REGISTRY, kind=None):
     Вернёт (путь, выбранная запись фильтра) или (None, None), если отменили.
     Формат и расширение по этой паре выбирает export_paths.choose_export_target.
     """
+    title = strings.EXPORT_TITLE
+    if kind is not None:
+        title = strings.EXPORT_TITLE_KIND.format(kind=strings.KIND_LABELS[kind])
     path, selected_filter = QFileDialog.getSaveFileName(
-        parent, strings.EXPORT_TITLE, "", registry.qt_filter("write", kind=kind)
+        parent,
+        title,
+        "",
+        registry.qt_filter("write", kind=kind),
+        options=QFileDialog.DontUseNativeDialog,
     )
     if not path:
         return None, None
@@ -84,12 +91,15 @@ class CadIOActions(object):
         name = self._open_part_window()
         if name is not None:
             return name
+        return self._new_window(path)
+
+    def _new_window(self, path):
+        """Создать уникально названное окно детали по имени импортируемого файла."""
         name = unique_name(base_name(path), self.main_window.Displayshape_core_dict)
-        # CreatePartWindown делает новую вкладку текущей; первая вкладка переключает ленту.
         self.main_window.ModuleWindowManager.CreatePartWindown(name)
         return name
 
-    def _show_shape(self, window_name, shape, path):
+    def _show_shape(self, window_name, shape, path, top_view=False):
         """Показать форму в окне детали: DisplayShape, FitAll, режимы выделения.
 
         Как в старом импорте, но дерево модели (组合浏览器) для форматов реестра не строится.
@@ -99,11 +109,13 @@ class CadIOActions(object):
         ais_shapes = display.DisplayShape(shape, update=True)
         key = unique_name(base_name(path), window.shape_maneger_core_dict)
         window.shape_maneger_core_dict[key] = ais_shapes[0]
+        if top_view:
+            display.View_Top()
         display.FitAll()
         self.main_window.InteractiveOperate.Setting()
 
     def import_file(self, checked=False):
-        """Кнопка «导入»: открыть файл в текущем окне детали или, если его нет, в новом.
+        """Кнопка «导入»: DXF открывает в новом окне, остальные форматы — в текущем или новом.
 
         STEP, IGES и STL читает старый OCAF.Import_part (цвета и дерево модели как раньше),
         остальные форматы — конвертер из реестра. checked передаёт сигнал triggered.
@@ -137,7 +149,11 @@ class CadIOActions(object):
                 shape = spec.reader(path)
             finally:
                 QApplication.restoreOverrideCursor()
-            self._show_shape(self._target_window(path), shape, path)
+            if spec.kind == "2d":
+                window_name = self._new_window(path)
+                self._show_shape(window_name, shape, path, top_view=True)
+            else:
+                self._show_shape(self._target_window(path), shape, path)
         except Exception as error:
             self._warn(
                 strings.IMPORT_FAILED.format(path=path or "", error=error), strings.IMPORT_TITLE
@@ -157,7 +173,11 @@ class CadIOActions(object):
         """
         try:
             context = self._current_context()
-            shapes = displayed_shapes(context) if context is not None else []
+            kind, shapes = (
+                displayed_export_shapes(context)
+                if context is not None
+                else (None, [])
+            )
         except Exception as error:
             self._warn(strings.EXPORT_SCENE_FAILED.format(error=error))
             return
@@ -168,12 +188,13 @@ class CadIOActions(object):
         raw_path = ""
         try:
             shape = combine_shapes(shapes)
-            # Окно детали — 3D-модель: 2D-форматы (DXF) не предлагаем и не принимаем.
-            raw_path, selected_filter = ask_save_path(self.main_window, self.registry, kind="3d")
+            raw_path, selected_filter = ask_save_path(
+                self.main_window, self.registry, kind=kind
+            )
             if raw_path is None:
                 return
             spec, path = choose_export_target(
-                self.registry, raw_path, selected_filter, kind="3d"
+                self.registry, raw_path, selected_filter, kind=kind
             )
             spec.writer(shape, path)
         except Exception as error:
